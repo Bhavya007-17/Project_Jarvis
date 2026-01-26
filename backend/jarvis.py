@@ -188,7 +188,7 @@ config = types.LiveConnectConfig(
     # We switch these from [] to {} to enable them with default settings
     output_audio_transcription={}, 
     input_audio_transcription={},
-    system_instruction="Your name is Ada, which stands for Advanced Design Assistant. "
+    system_instruction="Your name is Jarvis, which stands for Just A Rather Very Intelligent System. "
         "You have a witty and charming personality. "
         "Your creator is Naz, and you address him as 'Sir'. "
         "When answering, respond using complete and concise sentences to keep a quick pacing and keep the conversation flowing. "
@@ -277,7 +277,7 @@ class AudioLoop:
         # Assuming we are running from backend/ or root? 
         # Using abspath of current file to find root
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        # If ada.py is in backend/, project root is one up
+        # If jarvis.py is in backend/, project root is one up
         project_root = os.path.dirname(current_dir)
         self.project_manager = ProjectManager(project_root)
         
@@ -298,7 +298,7 @@ class AudioLoop:
         self._last_output_transcription = ""
 
     def update_permissions(self, new_perms):
-        print(f"[ADA DEBUG] [CONFIG] Updating tool permissions: {new_perms}")
+        print(f"[JARVIS DEBUG] [CONFIG] Updating tool permissions: {new_perms}")
         self.permissions.update(new_perms)
 
     def set_paused(self, paused):
@@ -308,16 +308,16 @@ class AudioLoop:
         self.stop_event.set()
         
     def resolve_tool_confirmation(self, request_id, confirmed):
-        print(f"[ADA DEBUG] [RESOLVE] resolve_tool_confirmation called. ID: {request_id}, Confirmed: {confirmed}")
+        print(f"[JARVIS DEBUG] [RESOLVE] resolve_tool_confirmation called. ID: {request_id}, Confirmed: {confirmed}")
         if request_id in self._pending_confirmations:
             future = self._pending_confirmations[request_id]
             if not future.done():
-                print(f"[ADA DEBUG] [RESOLVE] Future found and pending. Setting result to: {confirmed}")
+                print(f"[JARVIS DEBUG] [RESOLVE] Future found and pending. Setting result to: {confirmed}")
                 future.set_result(confirmed)
             else:
-                 print(f"[ADA DEBUG] [WARN] Request {request_id} future already done. Result: {future.result()}")
+                 print(f"[JARVIS DEBUG] [WARN] Request {request_id} future already done. Result: {future.result()}")
         else:
-            print(f"[ADA DEBUG] [WARN] Confirmation Request {request_id} not found in pending dict. Keys: {list(self._pending_confirmations.keys())}")
+            print(f"[JARVIS DEBUG] [WARN] Confirmation Request {request_id} not found in pending dict. Keys: {list(self._pending_confirmations.keys())}")
 
     def clear_audio_queue(self):
         """Clears the queue of pending audio chunks to stop playback immediately."""
@@ -327,9 +327,9 @@ class AudioLoop:
                 self.audio_in_queue.get_nowait()
                 count += 1
             if count > 0:
-                print(f"[ADA DEBUG] [AUDIO] Cleared {count} chunks from playback queue due to interruption.")
+                print(f"[JARVIS DEBUG] [AUDIO] Cleared {count} chunks from playback queue due to interruption.")
         except Exception as e:
-            print(f"[ADA DEBUG] [ERR] Failed to clear audio queue: {e}")
+            print(f"[JARVIS DEBUG] [ERR] Failed to clear audio queue: {e}")
 
     async def send_frame(self, frame_data):
         # Update the latest frame payload
@@ -354,7 +354,7 @@ class AudioLoop:
         resolved_input_device_index = None
         
         if self.input_device_name:
-            print(f"[ADA] Attempting to find input device matching: '{self.input_device_name}'")
+            print(f"[JARVIS] Attempting to find input device matching: '{self.input_device_name}'")
             count = pya.get_device_count()
             best_match = None
             
@@ -374,21 +374,21 @@ class AudioLoop:
                     continue
             
             if resolved_input_device_index is not None:
-                print(f"[ADA] Resolved input device '{self.input_device_name}' to index {resolved_input_device_index} ({best_match})")
+                print(f"[JARVIS] Resolved input device '{self.input_device_name}' to index {resolved_input_device_index} ({best_match})")
             else:
-                print(f"[ADA] Could not find device matching '{self.input_device_name}'. Checking index...")
+                print(f"[JARVIS] Could not find device matching '{self.input_device_name}'. Checking index...")
 
         # Fallback to index if Name lookup failed or wasn't provided
         if resolved_input_device_index is None and self.input_device_index is not None:
              try:
                  resolved_input_device_index = int(self.input_device_index)
-                 print(f"[ADA] Requesting Input Device Index: {resolved_input_device_index}")
+                 print(f"[JARVIS] Requesting Input Device Index: {resolved_input_device_index}")
              except ValueError:
-                 print(f"[ADA] Invalid device index '{self.input_device_index}', reverting to default.")
+                 print(f"[JARVIS] Invalid device index '{self.input_device_index}', reverting to default.")
                  resolved_input_device_index = None
 
         if resolved_input_device_index is None:
-             print("[ADA] Using Default Input Device")
+             print("[JARVIS] Using Default Input Device")
 
         try:
             self.audio_stream = await asyncio.to_thread(
@@ -401,8 +401,8 @@ class AudioLoop:
                 frames_per_buffer=CHUNK_SIZE,
             )
         except OSError as e:
-            print(f"[ADA] [ERR] Failed to open audio input stream: {e}")
-            print("[ADA] [WARN] Audio features will be disabled. Please check microphone permissions.")
+            print(f"[JARVIS] [ERR] Failed to open audio input stream: {e}")
+            print("[JARVIS] [WARN] Audio features will be disabled. Please check microphone permissions.")
             return
 
         if __debug__:
@@ -444,13 +444,13 @@ class AudioLoop:
                     if not self._is_speaking:
                         # NEW Speech Utterance Started
                         self._is_speaking = True
-                        print(f"[ADA DEBUG] [VAD] Speech Detected (RMS: {rms}). Sending Video Frame.")
+                        print(f"[JARVIS DEBUG] [VAD] Speech Detected (RMS: {rms}). Sending Video Frame.")
                         
                         # Send ONE frame
                         if self._latest_image_payload and self.out_queue:
                             await self.out_queue.put(self._latest_image_payload)
                         else:
-                            print(f"[ADA DEBUG] [VAD] No video frame available to send.")
+                            print(f"[JARVIS DEBUG] [VAD] No video frame available to send.")
                             
                 else:
                     # Silence
@@ -460,7 +460,7 @@ class AudioLoop:
                         
                         elif time.time() - self._silence_start_time > SILENCE_DURATION:
                             # Silence confirmed, reset state
-                            print(f"[ADA DEBUG] [VAD] Silence detected. Resetting speech state.")
+                            print(f"[JARVIS DEBUG] [VAD] Silence detected. Resetting speech state.")
                             self._is_speaking = False
                             self._silence_start_time = None
 
@@ -469,7 +469,7 @@ class AudioLoop:
                 await asyncio.sleep(0.1)
 
     async def handle_cad_request(self, prompt):
-        print(f"[ADA DEBUG] [CAD] Background Task Started: handle_cad_request('{prompt}')")
+        print(f"[JARVIS DEBUG] [CAD] Background Task Started: handle_cad_request('{prompt}')")
         if self.on_cad_status:
             self.on_cad_status("generating")
             
@@ -478,7 +478,7 @@ class AudioLoop:
             import datetime
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             new_project_name = f"Project_{timestamp}"
-            print(f"[ADA DEBUG] [CAD] Auto-creating project: {new_project_name}")
+            print(f"[JARVIS DEBUG] [CAD] Auto-creating project: {new_project_name}")
             
             success, msg = self.project_manager.create_project(new_project_name)
             if success:
@@ -498,13 +498,13 @@ class AudioLoop:
         cad_data = await self.cad_agent.generate_prototype(prompt, output_dir=cad_output_dir)
         
         if cad_data:
-            print(f"[ADA DEBUG] [OK] CadAgent returned data successfully.")
-            print(f"[ADA DEBUG] [INFO] Data Check: {len(cad_data.get('vertices', []))} vertices, {len(cad_data.get('edges', []))} edges.")
+            print(f"[JARVIS DEBUG] [OK] CadAgent returned data successfully.")
+            print(f"[JARVIS DEBUG] [INFO] Data Check: {len(cad_data.get('vertices', []))} vertices, {len(cad_data.get('edges', []))} edges.")
             
             if self.on_cad_data:
-                print(f"[ADA DEBUG] [SEND] Dispatching data to frontend callback...")
+                print(f"[JARVIS DEBUG] [SEND] Dispatching data to frontend callback...")
                 self.on_cad_data(cad_data)
-                print(f"[ADA DEBUG] [SENT] Dispatch complete.")
+                print(f"[JARVIS DEBUG] [SENT] Dispatch complete.")
             
             # Save to Project
             if 'file_path' in cad_data:
@@ -532,7 +532,7 @@ class AudioLoop:
 
 
     async def handle_write_file(self, path, content):
-        print(f"[ADA DEBUG] [FS] Writing file: '{path}'")
+        print(f"[JARVIS DEBUG] [FS] Writing file: '{path}'")
         
         # Auto-create project if stuck in temp
         if self.project_manager.current_project == "temp":
@@ -550,7 +550,7 @@ class AudioLoop:
                     if self.on_project_update:
                          self.on_project_update(new_project_name)
                 except Exception as e:
-                    print(f"[ADA DEBUG] [ERR] Failed to notify auto-project: {e}")
+                    print(f"[JARVIS DEBUG] [ERR] Failed to notify auto-project: {e}")
         
         # Force path to be relative to current project
         # If absolute path is provided, we try to strip it or just ignore it and use basename
@@ -568,7 +568,7 @@ class AudioLoop:
         if not os.path.isabs(path):
              final_path = current_project_path / path
         
-        print(f"[ADA DEBUG] [FS] Resolved path: '{final_path}'")
+        print(f"[JARVIS DEBUG] [FS] Resolved path: '{final_path}'")
 
         try:
             # Ensure parent exists
@@ -579,14 +579,14 @@ class AudioLoop:
         except Exception as e:
             result = f"Failed to write file '{path}': {str(e)}"
 
-        print(f"[ADA DEBUG] [FS] Result: {result}")
+        print(f"[JARVIS DEBUG] [FS] Result: {result}")
         try:
              await self.session.send(input=f"System Notification: {result}", end_of_turn=True)
         except Exception as e:
-             print(f"[ADA DEBUG] [ERR] Failed to send fs result: {e}")
+             print(f"[JARVIS DEBUG] [ERR] Failed to send fs result: {e}")
 
     async def handle_read_directory(self, path):
-        print(f"[ADA DEBUG] [FS] Reading directory: '{path}'")
+        print(f"[JARVIS DEBUG] [FS] Reading directory: '{path}'")
         try:
             if not os.path.exists(path):
                 result = f"Directory '{path}' does not exist."
@@ -614,14 +614,14 @@ class AudioLoop:
         except Exception as e:
             result = f"Failed to read file '{path}': {str(e)}"
 
-        print(f"[ADA DEBUG] [FS] Result: {result}")
+        print(f"[JARVIS DEBUG] [FS] Result: {result}")
         try:
              await self.session.send(input=f"System Notification: {result}", end_of_turn=True)
         except Exception as e:
-             print(f"[ADA DEBUG] [ERR] Failed to send fs result: {e}")
+             print(f"[JARVIS DEBUG] [ERR] Failed to send fs result: {e}")
 
     async def handle_web_agent_request(self, prompt):
-        print(f"[ADA DEBUG] [WEB] Web Agent Task: '{prompt}'")
+        print(f"[JARVIS DEBUG] [WEB] Web Agent Task: '{prompt}'")
         
         async def update_frontend(image_b64, log_text):
             if self.on_web_data:
@@ -629,13 +629,13 @@ class AudioLoop:
                  
         # Run the web agent and wait for it to return
         result = await self.web_agent.run_task(prompt, update_callback=update_frontend)
-        print(f"[ADA DEBUG] [WEB] Web Agent Task Returned: {result}")
+        print(f"[JARVIS DEBUG] [WEB] Web Agent Task Returned: {result}")
         
         # Send the final result back to the main model
         try:
              await self.session.send(input=f"System Notification: Web Agent has finished.\nResult: {result}", end_of_turn=True)
         except Exception as e:
-             print(f"[ADA DEBUG] [ERR] Failed to send web agent result to model: {e}")
+             print(f"[JARVIS DEBUG] [ERR] Failed to send web agent result to model: {e}")
 
     async def receive_audio(self):
         "Background task to reads from the websocket and write pcm chunks to the output queue"
@@ -696,10 +696,10 @@ class AudioLoop:
                                     if delta:
                                         # Send to frontend (Streaming)
                                         if self.on_transcription:
-                                             self.on_transcription({"sender": "ADA", "text": delta})
+                                             self.on_transcription({"sender": "JARVIS", "text": delta})
                                         
                                         # Buffer for Logging
-                                        if self.chat_buffer["sender"] != "ADA":
+                                        if self.chat_buffer["sender"] != "JARVIS":
                                             # Flush previous
                                             if self.chat_buffer["sender"] and self.chat_buffer["text"].strip():
                                                 self.project_manager.log_chat(self.chat_buffer["sender"], self.chat_buffer["text"])
@@ -725,7 +725,7 @@ class AudioLoop:
                                 confirmation_required = self.permissions.get(fc.name, True)
                                 
                                 if not confirmation_required:
-                                    print(f"[ADA DEBUG] [TOOL] Permission check: '{fc.name}' -> AUTO-ALLOW")
+                                    print(f"[JARVIS DEBUG] [TOOL] Permission check: '{fc.name}' -> AUTO-ALLOW")
                                     # Skip confirmation block and jump to execution
                                     pass
                                 else:
@@ -751,10 +751,10 @@ class AudioLoop:
                                     finally:
                                         self._pending_confirmations.pop(request_id, None)
 
-                                    print(f"[ADA DEBUG] [CONFIRM] Request {request_id} resolved. Confirmed: {confirmed}")
+                                    print(f"[JARVIS DEBUG] [CONFIRM] Request {request_id} resolved. Confirmed: {confirmed}")
 
                                     if not confirmed:
-                                        print(f"[ADA DEBUG] [DENY] Tool call '{fc.name}' denied by user.")
+                                        print(f"[JARVIS DEBUG] [DENY] Tool call '{fc.name}' denied by user.")
                                         function_response = types.FunctionResponse(
                                             id=fc.id,
                                             name=fc.name,
@@ -766,7 +766,7 @@ class AudioLoop:
                                         continue
 
                                     if not confirmed:
-                                        print(f"[ADA DEBUG] [DENY] Tool call '{fc.name}' denied by user.")
+                                        print(f"[JARVIS DEBUG] [DENY] Tool call '{fc.name}' denied by user.")
                                         function_response = types.FunctionResponse(
                                             id=fc.id,
                                             name=fc.name,
@@ -787,7 +787,7 @@ class AudioLoop:
                                     # No function response needed - model already acknowledged when user asked
                                 
                                 elif fc.name == "run_web_agent":
-                                    print(f"[ADA DEBUG] [TOOL] Tool Call: 'run_web_agent' with prompt='{prompt}'")
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'run_web_agent' with prompt='{prompt}'")
                                     asyncio.create_task(self.handle_web_agent_request(prompt))
                                     
                                     result_text = "Web Navigation started. Do not reply to this message."
@@ -815,7 +815,7 @@ class AudioLoop:
 
                                 elif fc.name == "read_directory":
                                     path = fc.args["path"]
-                                    print(f"[ADA DEBUG] [TOOL] Tool Call: 'read_directory' path='{path}'")
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'read_directory' path='{path}'")
                                     asyncio.create_task(self.handle_read_directory(path))
                                     function_response = types.FunctionResponse(
                                         id=fc.id, name=fc.name, response={"result": "Reading directory..."}
@@ -833,7 +833,7 @@ class AudioLoop:
 
                                 elif fc.name == "create_project":
                                     name = fc.args["name"]
-                                    print(f"[ADA DEBUG] [TOOL] Tool Call: 'create_project' name='{name}'")
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'create_project' name='{name}'")
                                     success, msg = self.project_manager.create_project(name)
                                     if success:
                                         # Auto-switch to the newly created project
@@ -866,7 +866,7 @@ class AudioLoop:
                                     function_responses.append(function_response)
                                 
                                 elif fc.name == "list_projects":
-                                    print(f"[ADA DEBUG] [TOOL] Tool Call: 'list_projects'")
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'list_projects'")
                                     projects = self.project_manager.list_projects()
                                     function_response = types.FunctionResponse(
                                         id=fc.id, name=fc.name, response={"result": f"Available projects: {', '.join(projects)}"}
@@ -928,7 +928,7 @@ class AudioLoop:
                                     brightness = fc.args.get("brightness")
                                     color = fc.args.get("color")
                                     
-                                    print(f"[ADA DEBUG] [TOOL] Tool Call: 'control_light' Target='{target}' Action='{action}'")
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'control_light' Target='{target}' Action='{action}'")
                                     
                                     result_msg = f"Action '{action}' on '{target}' failed."
                                     success = False
@@ -1023,7 +1023,7 @@ class AudioLoop:
                                     printer = fc.args["printer"]
                                     profile = fc.args.get("profile")
                                     
-                                    print(f"[ADA DEBUG] [TOOL] Tool Call: 'print_stl' STL='{stl_path}' Printer='{printer}'")
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'print_stl' STL='{stl_path}' Printer='{printer}'")
                                     
                                     # Resolve 'current' to project STL
                                     if stl_path.lower() == "current":
@@ -1076,7 +1076,7 @@ class AudioLoop:
 
                                 elif fc.name == "iterate_cad":
                                     prompt = fc.args["prompt"]
-                                    print(f"[ADA DEBUG] [TOOL] Tool Call: 'iterate_cad' Prompt='{prompt}'")
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'iterate_cad' Prompt='{prompt}'")
                                     
                                     # Emit status
                                     if self.on_cad_status:
@@ -1089,20 +1089,20 @@ class AudioLoop:
                                     cad_data = await self.cad_agent.iterate_prototype(prompt, output_dir=cad_output_dir)
                                     
                                     if cad_data:
-                                        print(f"[ADA DEBUG] [OK] CadAgent iteration returned data successfully.")
+                                        print(f"[JARVIS DEBUG] [OK] CadAgent iteration returned data successfully.")
                                         
                                         # Dispatch to frontend
                                         if self.on_cad_data:
-                                            print(f"[ADA DEBUG] [SEND] Dispatching iterated CAD data to frontend...")
+                                            print(f"[JARVIS DEBUG] [SEND] Dispatching iterated CAD data to frontend...")
                                             self.on_cad_data(cad_data)
-                                            print(f"[ADA DEBUG] [SENT] Dispatch complete.")
+                                            print(f"[JARVIS DEBUG] [SENT] Dispatch complete.")
                                         
                                         # Save to Project
                                         self.project_manager.save_cad_artifact("output.stl", f"Iteration: {prompt}")
                                         
                                         result_str = f"Successfully iterated design: {prompt}. The updated 3D model is now displayed."
                                     else:
-                                        print(f"[ADA DEBUG] [ERR] CadAgent iteration returned None.")
+                                        print(f"[JARVIS DEBUG] [ERR] CadAgent iteration returned None.")
                                         result_str = f"Failed to iterate design with prompt: {prompt}"
                                     
                                     function_response = types.FunctionResponse(
@@ -1201,7 +1201,7 @@ class AudioLoop:
                     # Handle Startup vs Reconnect Logic
                     if not is_reconnect:
                         if start_message:
-                            print(f"[ADA DEBUG] [INFO] Sending start message: {start_message}")
+                            print(f"[JARVIS DEBUG] [INFO] Sending start message: {start_message}")
                             await self.session.send(input=start_message, end_of_turn=True)
                         
                         # Sync Project State
@@ -1222,7 +1222,7 @@ class AudioLoop:
                         
                         context_msg += "\nPlease acknowledge the reconnection to the user (e.g. 'I lost connection for a moment, but I'm back...') and resume what you were doing."
                         
-                        print(f"[ADA DEBUG] [RECONNECT] Sending restoration context to model...")
+                        print(f"[JARVIS DEBUG] [RECONNECT] Sending restoration context to model...")
                         await self.session.send(input=context_msg, end_of_turn=True)
 
                     # Reset retry delay on successful connection
@@ -1247,12 +1247,12 @@ class AudioLoop:
                 
             except Exception as e:
                 # This catches the ExceptionGroup from TaskGroup or direct exceptions
-                print(f"[ADA DEBUG] [ERR] Connection Error: {e}")
+                print(f"[JARVIS DEBUG] [ERR] Connection Error: {e}")
                 
                 if self.stop_event.is_set():
                     break
                 
-                print(f"[ADA DEBUG] [RETRY] Reconnecting in {retry_delay} seconds...")
+                print(f"[JARVIS DEBUG] [RETRY] Reconnecting in {retry_delay} seconds...")
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 10) # Exponential backoff capped at 10s
                 is_reconnect = True # Next loop will be a reconnect

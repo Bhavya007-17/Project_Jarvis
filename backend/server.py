@@ -19,10 +19,10 @@ from pathlib import Path
 
 
 
-# Ensure we can import ada
+# Ensure we can import jarvis
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-import ada
+import jarvis
 from authenticator import FaceAuthenticator
 from kasa_agent import KasaAgent
 
@@ -124,9 +124,13 @@ async def startup_event():
     print("[SERVER] Startup: Initializing Kasa Agent...")
     await kasa_agent.initialize()
 
+@app.get("/")
+async def root():
+    return {"service": "J.A.R.V.I.S Backend", "status": "running", "endpoints": ["/status"]}
+
 @app.get("/status")
 async def status():
-    return {"status": "running", "service": "A.D.A Backend"}
+    return {"status": "running", "service": "J.A.R.V.I.S Backend"}
 
 @sio.event
 async def connect(sid, environ):
@@ -203,7 +207,7 @@ async def start_audio(sid, data=None):
              loop_task = None
         else:
              print("Audio loop already running. Re-connecting client to session.")
-             await sio.emit('status', {'msg': 'A.D.A Already Running'})
+             await sio.emit('status', {'msg': 'J.A.R.V.I.S Already Running'})
              return
 
 
@@ -238,7 +242,7 @@ async def start_audio(sid, data=None):
     # Callback to send CAD status to frontend
     def on_cad_status(status):
         # status can be: 
-        # - a string like "generating" (from ada.py handle_cad_request)
+        # - a string like "generating" (from jarvis.py handle_cad_request)
         # - a dict with {status, attempt, max_attempts, error} (from CadAgent)
         if isinstance(status, dict):
             print(f"Sending CAD Status: {status.get('status')} (attempt {status.get('attempt')}/{status.get('max_attempts')})")
@@ -268,10 +272,10 @@ async def start_audio(sid, data=None):
         print(f"Sending Error to frontend: {msg}")
         asyncio.create_task(sio.emit('error', {'msg': msg}))
 
-    # Initialize ADA
+    # Initialize JARVIS
     try:
         print(f"Initializing AudioLoop with device_index={device_index}")
-        audio_loop = ada.AudioLoop(
+        audio_loop = jarvis.AudioLoop(
             video_mode="none", 
             on_audio_data=on_audio_data,
             on_cad_data=on_cad_data,
@@ -313,8 +317,8 @@ async def start_audio(sid, data=None):
         
         loop_task.add_done_callback(handle_loop_exit)
         
-        print("Emitting 'A.D.A Started'")
-        await sio.emit('status', {'msg': 'A.D.A Started'})
+        print("Emitting 'J.A.R.V.I.S Started'")
+        await sio.emit('status', {'msg': 'J.A.R.V.I.S Started'})
 
         # Load saved printers
         saved_printers = SETTINGS.get("printers", [])
@@ -333,7 +337,7 @@ async def start_audio(sid, data=None):
         asyncio.create_task(monitor_printers_loop())
         
     except Exception as e:
-        print(f"CRITICAL ERROR STARTING ADA: {e}")
+        print(f"CRITICAL ERROR STARTING JARVIS: {e}")
         import traceback
         traceback.print_exc()
         await sio.emit('error', {'msg': f"Failed to start: {str(e)}"})
@@ -717,7 +721,7 @@ async def discover_printers(sid):
             return
         else:
             await sio.emit('printer_list', [])
-            await sio.emit('status', {'msg': "Connect to A.D.A to enable printer discovery"})
+            await sio.emit('status', {'msg': "Connect to J.A.R.V.I.S to enable printer discovery"})
             return
         
     try:
