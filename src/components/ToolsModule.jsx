@@ -1,5 +1,5 @@
 import React from 'react';
-import { Mic, MicOff, Settings, Power, Video, VideoOff, Hand, Lightbulb, Printer, Globe, Box } from 'lucide-react';
+import { Mic, MicOff, Settings, Power, Video, VideoOff, Hand, Lightbulb, Printer, Globe, Box, Calendar } from 'lucide-react';
 
 const ToolsModule = ({
     isConnected,
@@ -21,6 +21,8 @@ const ToolsModule = ({
     showCadWindow,
     onToggleBrowser,
     showBrowserWindow,
+    onToggleCalendar,
+    showCalendarWindow,
     activeDragElement,
 
     position,
@@ -140,6 +142,17 @@ const ToolsModule = ({
                         } `}
                 >
                     <Globe size={24} />
+                </button>
+
+                {/* Calendar & Todo Toggle */}
+                <button
+                    onClick={onToggleCalendar}
+                    className={`p-3 rounded-full border-2 transition-all duration-300 ${showCalendarWindow
+                        ? 'border-pink-400 bg-pink-400/10 text-pink-400 hover:bg-pink-400/20 shadow-[0_0_15px_rgba(244,114,182,0.3)]'
+                        : 'border-cyan-900 text-cyan-700 hover:border-pink-500 hover:text-pink-500'
+                        } `}
+                >
+                    <Calendar size={24} />
                 </button>
             </div>
         </div>

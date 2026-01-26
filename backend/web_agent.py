@@ -193,17 +193,21 @@ class WebAgent:
         final_response = "Agent finished without a final summary."
 
         async with async_playwright() as p:
-            # Launch browser (Headless=True usually, but for dev we might keep it hidden)
-            # Use headless=True for server deployment
-            self.browser = await p.chromium.launch(headless=True) 
+            # Launch browser with visible window so user can see Google tabs opening
+            # Use headless=False to open actual browser windows
+            # Add args to ensure browser is visible and opens new tabs properly
+            self.browser = await p.chromium.launch(
+                headless=False,
+                args=['--start-maximized', '--disable-blink-features=AutomationControlled']
+            ) 
             self.context = await self.browser.new_context(
                 viewport={"width": SCREEN_WIDTH, "height": SCREEN_HEIGHT},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
             self.page = await self.context.new_page()
             
-            # Start at Google
-            await self.page.goto("https://www.google.com")
+            # Start at Google - wait for page to fully load
+            await self.page.goto("https://www.google.com", wait_until="networkidle")
 
             config = types.GenerateContentConfig(
                 tools=[types.Tool(

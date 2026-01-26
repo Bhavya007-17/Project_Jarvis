@@ -67,7 +67,13 @@ DEFAULT_SETTINGS = {
         "read_file": True,
         "create_project": True,
         "switch_project": True,
-        "list_projects": True
+        "list_projects": True,
+        "add_todo": False,
+        "get_todos": False,
+        "complete_todo": False,
+        "delete_todo": False,
+        "get_calendar_events": False,
+        "add_calendar_event": False
     },
     "printers": [], # List of {host, port, name, type}
     "kasa_devices": [], # List of {ip, alias, model}
@@ -267,10 +273,28 @@ async def start_audio(sid, data=None):
         print(f"Sending Kasa Device Update: {len(devices)} devices")
         asyncio.create_task(sio.emit('kasa_devices', devices))
 
+    # Callback to send Todo Update to frontend
+    def on_todo_update(data):
+        # data = {"action": "add"|"get"|"complete"|"delete", "task": "...", "task_id": ...}
+        print(f"Sending Todo Update: {data.get('action')}")
+        asyncio.create_task(sio.emit('todo_update', data))
+
+    # Callback to send Calendar Update to frontend
+    def on_calendar_update(data):
+        # data = {"action": "add"|"get", "title": "...", "time": "...", "date": "...", "description": "..."}
+        print(f"Sending Calendar Update: {data.get('action')}")
+        asyncio.create_task(sio.emit('calendar_update', data))
+
     # Callback to send Error to frontend
     def on_error(msg):
         print(f"Sending Error to frontend: {msg}")
-        asyncio.create_task(sio.emit('error', {'msg': msg}))
+        # Check if this is a shutdown request
+        if msg == "SHUTDOWN_REQUESTED":
+            print("[SERVER] Shutdown requested via voice command")
+            # Schedule shutdown
+            asyncio.create_task(shutdown_system())
+        else:
+            asyncio.create_task(sio.emit('error', {'msg': msg}))
 
     # Initialize JARVIS
     try:
@@ -286,6 +310,8 @@ async def start_audio(sid, data=None):
             on_cad_thought=on_cad_thought,
             on_project_update=on_project_update,
             on_device_update=on_device_update,
+            on_todo_update=on_todo_update,
+            on_calendar_update=on_calendar_update,
             on_error=on_error,
 
             input_device_index=device_index,
@@ -423,6 +449,12 @@ async def shutdown(sid, data=None):
     print("[SERVER] SHUTDOWN SIGNAL RECEIVED FROM FRONTEND")
     print("[SERVER] ========================================")
     
+    await shutdown_system()
+
+async def shutdown_system():
+    """Shared shutdown logic for both voice command and frontend shutdown."""
+    global audio_loop, loop_task, authenticator
+    
     # Stop audio loop
     if audio_loop:
         print("[SERVER] Stopping Audio Loop...")
@@ -441,6 +473,9 @@ async def shutdown(sid, data=None):
         authenticator.stop()
     
     print("[SERVER] Graceful shutdown complete. Terminating process...")
+    
+    # Emit shutdown status to frontend
+    await sio.emit('status', {'msg': 'JARVIS Shutting Down'})
     
     # Force exit immediately - os._exit bypasses cleanup but ensures termination
     os._exit(0)
@@ -981,6 +1016,85 @@ async def update_tool_permissions(sid, data):
         audio_loop.update_permissions(SETTINGS["tool_permissions"])
     # Broadcast update to all
     await sio.emit('tool_permissions', SETTINGS["tool_permissions"])
+
+@sio.event
+async def get_calendar_events(sid):
+    """Fetch Google Calendar events for today."""
+    print("Received get_calendar_events request")
+    try:
+        # Try to fetch from Google Calendar API
+        # For now, return placeholder events until OAuth is set up
+        # TODO: Implement Google Calendar API OAuth flow
+        
+        from datetime import datetime, timedelta
+        today = datetime.now().date()
+        tomorrow = today + timedelta(days=1)
+        
+        # Placeholder events - replace with actual API call
+        events = [
+            {
+                'id': 1,
+                'title': 'Meeting with Team',
+                'time': '10:00 AM',
+                'date': today.strftime('%Y-%m-%d'),
+                'description': 'Team sync meeting'
+            },
+            {
+                'id': 2,
+                'title': 'Project Review',
+                'time': '2:00 PM',
+                'date': today.strftime('%Y-%m-%d'),
+                'description': 'Quarterly project review'
+            }
+        ]
+        
+        await sio.emit('calendar_events', events, room=sid)
+        await sio.emit('status', {'msg': f'Loaded {len(events)} calendar events'})
+        
+    except Exception as e:
+        print(f"Error fetching calendar events: {e}")
+        await sio.emit('error', {'msg': f"Failed to fetch calendar events: {str(e)}"})
+
+@sio.event
+async def todo_update(sid, data):
+    """Handle todo list updates from frontend."""
+    print(f"Received todo_update request: {data}")
+    # This is a request from frontend to update todos
+    # The actual todo management happens in the frontend (localStorage)
+    # We just acknowledge it
+    await sio.emit('todo_update_response', {'status': 'ok'}, room=sid)
+
+@sio.event
+async def get_todos(sid):
+    """Get current todo list from frontend."""
+    print("Received get_todos request")
+    # Request todos from frontend - frontend will emit 'todos_list' with the data
+    await sio.emit('request_todos', {}, room=sid)
+
+@sio.event
+async def todos_list(sid, data):
+    """Receive todo list from frontend and update agent cache."""
+    print(f"Received todos_list: {len(data.get('todos', []))} todos")
+    # Update the audio loop's todo cache
+    if audio_loop:
+        audio_loop._todos_cache = data.get('todos', [])
+
+@sio.event
+async def calendar_update(sid, data):
+    """Handle calendar updates from frontend."""
+    print(f"Received calendar_update request: {data}")
+    # This is a request from frontend to update calendar
+    # The actual calendar management happens in the frontend
+    # We just acknowledge it
+    await sio.emit('calendar_update_response', {'status': 'ok'}, room=sid)
+
+@sio.event
+async def calendar_events_list(sid, data):
+    """Receive calendar events list from frontend and update agent cache."""
+    print(f"Received calendar_events_list: {len(data.get('events', []))} events")
+    # Update the audio loop's calendar cache
+    if audio_loop:
+        audio_loop._calendar_events_cache = data.get('events', [])
 
 if __name__ == "__main__":
     uvicorn.run(

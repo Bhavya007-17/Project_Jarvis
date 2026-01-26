@@ -6,7 +6,9 @@ python-multipart
 google-genai
 # Computer Vision & Audio
 opencv-python
-pyaudio
+# Audio - Using sounddevice instead of pyaudio for better cross-platform support
+sounddevice
+numpy
 pillow
 mss
 # Browser Automation
@@ -22,3 +24,5 @@ python-dotenv
 mediapipe
 # CAD Generation
 build123d
+# Wake Word Listener
+SpeechRecognition

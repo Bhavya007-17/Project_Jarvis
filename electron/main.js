@@ -63,13 +63,98 @@ function createWindow() {
     });
 }
 
+function findPythonExecutable() {
+    const { execSync } = require('child_process');
+    const os = require('os');
+    const fs = require('fs');
+    
+    // Try to find conda Python in common locations
+    const homeDir = os.homedir();
+    const username = os.userInfo().username;
+    const possiblePaths = [
+        // Miniconda
+        path.join(homeDir, 'miniconda3', 'envs', 'ada_v2', 'python.exe'),
+        path.join(homeDir, 'miniconda3', 'envs', 'ada_v2', 'python'),
+        // Anaconda
+        path.join(homeDir, 'anaconda3', 'envs', 'ada_v2', 'python.exe'),
+        path.join(homeDir, 'anaconda3', 'envs', 'ada_v2', 'python'),
+        // Common Windows locations with username
+        `C:\\Users\\${username}\\miniconda3\\envs\\ada_v2\\python.exe`,
+        `C:\\Users\\${username}\\anaconda3\\envs\\ada_v2\\python.exe`,
+        // Check CONDA_PREFIX if set
+        process.env.CONDA_PREFIX ? path.join(process.env.CONDA_PREFIX, 'python.exe') : null,
+        process.env.CONDA_PREFIX ? path.join(process.env.CONDA_PREFIX, 'python') : null,
+    ].filter(p => p !== null);
+    
+    // Check if any of these paths exist
+    for (const pythonPath of possiblePaths) {
+        try {
+            if (fs.existsSync(pythonPath)) {
+                console.log(`Found Python at: ${pythonPath}`);
+                return pythonPath;
+            }
+        } catch (e) {
+            // Continue checking
+        }
+    }
+    
+    // Try to get Python from conda info
+    try {
+        if (process.platform === 'win32') {
+            // Try to get conda base path from conda info
+            const condaInfo = execSync('conda info --base', { encoding: 'utf8', stdio: 'pipe', shell: true }).trim();
+            if (condaInfo) {
+                const envPython = path.join(condaInfo, 'envs', 'ada_v2', 'python.exe');
+                if (fs.existsSync(envPython)) {
+                    console.log(`Found Python via conda info at: ${envPython}`);
+                    return envPython;
+                }
+            }
+        }
+    } catch (e) {
+        console.log('Could not find conda via conda info, trying other methods...');
+    }
+    
+    // Try using conda run as last resort
+    try {
+        if (process.platform === 'win32') {
+            execSync('conda --version', { encoding: 'utf8', stdio: 'pipe', shell: true });
+            console.log('Using conda run to execute Python');
+            return 'conda'; // Special flag to use conda run
+        }
+    } catch (e) {
+        // Conda not available
+    }
+    
+    // Fallback to system Python
+    console.log('Using system Python (make sure conda environment is activated)');
+    return 'python';
+}
+
 function startPythonBackend() {
     const scriptPath = path.join(__dirname, '../backend/server.py');
+    let pythonExecutable = findPythonExecutable();
     console.log(`Starting Python backend: ${scriptPath}`);
+    console.log(`Using Python: ${pythonExecutable}`);
 
-    // Assuming 'python' is in PATH. In prod, this would be the executable.
-    pythonProcess = spawn('python', [scriptPath], {
+    let command, args;
+    if (pythonExecutable === 'conda') {
+        // Use conda run to execute in the environment
+        command = 'conda';
+        args = ['run', '-n', 'ada_v2', 'python', scriptPath];
+    } else {
+        command = pythonExecutable;
+        args = [scriptPath];
+    }
+
+    pythonProcess = spawn(command, args, {
         cwd: path.join(__dirname, '../backend'),
+        shell: process.platform === 'win32', // Use shell on Windows for better path resolution
+        env: {
+            ...process.env,
+            // Ensure we're using the right Python environment
+            PYTHONPATH: path.join(__dirname, '../backend'),
+        }
     });
 
     pythonProcess.stdout.on('data', (data) => {
@@ -78,6 +163,20 @@ function startPythonBackend() {
 
     pythonProcess.stderr.on('data', (data) => {
         console.error(`[Python Error]: ${data}`);
+    });
+    
+    pythonProcess.on('error', (err) => {
+        console.error(`[Python Process Error]: ${err.message}`);
+        console.error('Make sure the conda environment "ada_v2" is set up correctly.');
+    });
+    
+    pythonProcess.on('exit', (code, signal) => {
+        if (code !== null && code !== 0) {
+            console.error(`[Python Process] Exited with code ${code}`);
+        }
+        if (signal) {
+            console.log(`[Python Process] Killed by signal ${signal}`);
+        }
     });
 }
 

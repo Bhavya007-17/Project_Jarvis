@@ -15,6 +15,7 @@ import AuthLock from './components/AuthLock';
 import KasaWindow from './components/KasaWindow';
 import PrinterWindow from './components/PrinterWindow';
 import SettingsWindow from './components/SettingsWindow';
+import CalendarTodoPanel from './components/CalendarTodoPanel';
 
 
 
@@ -60,6 +61,7 @@ function App() {
     const [showPrinterWindow, setShowPrinterWindow] = useState(false);
     const [showCadWindow, setShowCadWindow] = useState(false);
     const [showBrowserWindow, setShowBrowserWindow] = useState(false);
+    const [showCalendarTodo, setShowCalendarTodo] = useState(false);
 
     // Printing workflow status (for top toolbar display)
     const [slicingStatus, setSlicingStatus] = useState({ active: false, percent: 0, message: '' });
@@ -95,6 +97,7 @@ function App() {
         browser: { x: window.innerWidth / 2 - 300, y: window.innerHeight / 2 },
         kasa: { x: window.innerWidth / 2 + 350, y: window.innerHeight / 2 - 100 },
         printer: { x: window.innerWidth / 2 - 350, y: window.innerHeight / 2 - 100 },
+        calendar: { x: window.innerWidth / 2 + 200, y: window.innerHeight / 2 + 150 },
         tools: { x: window.innerWidth / 2, y: window.innerHeight - 100 } // Fixed bottom OFFSET
     });
 
@@ -106,13 +109,14 @@ function App() {
         browser: { w: 550, h: 380 },
         video: { w: 320, h: 180 },
         kasa: { w: 300, h: 380 }, // Approx
-        printer: { w: 380, h: 380 } // Approx
+        printer: { w: 380, h: 380 }, // Approx
+        calendar: { w: 450, h: 600 } // Approx
     });
     const [activeDragElement, setActiveDragElement] = useState(null);
 
     // Z-Index Stacking Order (last element = highest z-index)
     const [zIndexOrder, setZIndexOrder] = useState([
-        'visualizer', 'chat', 'tools', 'video', 'cad', 'browser', 'kasa', 'printer'
+        'visualizer', 'chat', 'tools', 'video', 'cad', 'browser', 'kasa', 'printer', 'calendar'
     ]);
 
     // Hand Control State
@@ -1644,6 +1648,8 @@ function App() {
                         showCadWindow={showCadWindow}
                         onToggleBrowser={() => setShowBrowserWindow(!showBrowserWindow)}
                         showBrowserWindow={showBrowserWindow}
+                        onToggleCalendar={() => setShowCalendarTodo(!showCalendarTodo)}
+                        showCalendarWindow={showCalendarTodo}
                         activeDragElement={activeDragElement}
                         position={elementPositions.tools}
                         onMouseDown={(e) => handleMouseDown(e, 'tools')}
@@ -1674,6 +1680,18 @@ function App() {
                         activeDragElement={activeDragElement}
                         setActiveDragElement={setActiveDragElement}
                         zIndex={getZIndex('printer')}
+                    />
+                )}
+
+                {/* Calendar & Todo Panel */}
+                {showCalendarTodo && (
+                    <CalendarTodoPanel
+                        socket={socket}
+                        position={elementPositions.calendar}
+                        onClose={() => setShowCalendarTodo(false)}
+                        onMouseDown={(e) => handleMouseDown(e, 'calendar')}
+                        activeDragElement={activeDragElement}
+                        zIndex={getZIndex('calendar')}
                     />
                 )}
 

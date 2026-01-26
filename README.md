@@ -100,7 +100,7 @@ npm install
 echo "GEMINI_API_KEY=your_key_here" > .env
 
 # 5. Run!
-conda activate jarvis_v2 && npm run dev
+conda activate ada_v2 && npm run dev
 ```
 
 </details>
@@ -158,8 +158,8 @@ brew install portaudio
 Create a single Python 3.11 environment:
 
 ```bash
-conda create -n jarvis_v2 python=3.11
-conda activate jarvis_v2
+conda create -n ada_v2 python=3.11
+conda activate ada_v2
 
 # Install all dependencies
 pip install -r requirements.txt
@@ -293,12 +293,12 @@ JARVIS uses Google's Gemini API for voice and intelligence. You need a free API 
 
 ## 🚀 Running JARVIS V2
 
-You have two options to run the app. Ensure your `jarvis_v2` environment is active!
+You have two options to run the app. Ensure your `ada_v2` environment is active!
 
 ### Option 1: The "Easy" Way (Single Terminal)
 The app is smart enough to start the backend for you.
 1. Open your terminal in the project folder.
-2. Activate your environment: `conda activate jarvis_v2`
+2. Activate your environment: `conda activate ada_v2`
 3. Run:
    ```bash
    npm run dev
@@ -310,7 +310,7 @@ Use this if you want to see the Python logs (recommended for debugging).
 
 **Terminal 1 (Backend):**
 ```bash
-conda activate jarvis_v2
+conda activate ada_v2
 python backend/server.py
 ```
 
@@ -383,6 +383,24 @@ npm run dev
 1. Go to **System Preferences > Privacy & Security > Camera**.
 2. Ensure your terminal app (e.g., Terminal, iTerm, VS Code) has camera access enabled.
 3. Restart the app after granting permission.
+
+---
+
+### PowerShell Execution Policy Error (Windows)
+**Symptoms**: `npm : File C:\Program Files\nodejs\npm.ps1 cannot be loaded because running scripts is disabled`
+
+**Solution**:
+1. **Quick Fix**: Use `npm.cmd` instead of `npm`:
+   ```powershell
+   npm.cmd run dev
+   ```
+
+2. **Permanent Fix**: Change PowerShell execution policy (run PowerShell as Administrator):
+   ```powershell
+   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+   ```
+
+3. **Alternative**: Use Command Prompt (cmd.exe) instead of PowerShell
 
 ---
 

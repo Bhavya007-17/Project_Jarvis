@@ -4,9 +4,11 @@ import io
 import os
 import sys
 import traceback
+import queue
 from dotenv import load_dotenv
 import cv2
-import pyaudio
+import sounddevice as sd
+import numpy as np
 import PIL.Image
 import mss
 import argparse
@@ -24,7 +26,8 @@ if sys.version_info < (3, 11, 0):
 
 from tools import tools_list
 
-FORMAT = pyaudio.paInt16
+# Audio format constants (sounddevice uses numpy dtypes)
+FORMAT = np.int16  # 16-bit PCM
 CHANNELS = 1
 SEND_SAMPLE_RATE = 16000
 RECEIVE_SAMPLE_RATE = 24000
@@ -180,7 +183,106 @@ iterate_cad_tool = {
     "behavior": "NON_BLOCKING"
 }
 
-tools = [{'google_search': {}}, {"function_declarations": [generate_cad, run_web_agent, create_project_tool, switch_project_tool, list_projects_tool, list_smart_devices_tool, control_light_tool, discover_printers_tool, print_stl_tool, get_print_status_tool, iterate_cad_tool] + tools_list[0]['function_declarations'][1:]}]
+shutdown_system_tool = {
+    "name": "shutdown_system",
+    "description": "Shuts down the JARVIS system gracefully when the user requests it (e.g., 'jarvis shut down', 'jarvis shutdown').",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {}
+    }
+}
+
+add_todo_tool = {
+    "name": "add_todo",
+    "description": "Adds a new task to the user's to-do list.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "task": {
+                "type": "STRING",
+                "description": "The task description to add to the to-do list."
+            }
+        },
+        "required": ["task"]
+    }
+}
+
+get_todos_tool = {
+    "name": "get_todos",
+    "description": "Gets the current list of to-do items. Returns all tasks including completed and pending ones.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {}
+    }
+}
+
+complete_todo_tool = {
+    "name": "complete_todo",
+    "description": "Marks a to-do item as completed. Use the task ID or task text to identify which task to complete.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "task_id": {
+                "type": "INTEGER",
+                "description": "The ID of the task to mark as completed."
+            }
+        },
+        "required": ["task_id"]
+    }
+}
+
+delete_todo_tool = {
+    "name": "delete_todo",
+    "description": "Deletes a to-do item from the list. Use the task ID to identify which task to delete.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "task_id": {
+                "type": "INTEGER",
+                "description": "The ID of the task to delete."
+            }
+        },
+        "required": ["task_id"]
+    }
+}
+
+get_calendar_events_tool = {
+    "name": "get_calendar_events",
+    "description": "Gets calendar events for today. Returns a list of scheduled events with their times and descriptions.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {}
+    }
+}
+
+add_calendar_event_tool = {
+    "name": "add_calendar_event",
+    "description": "Adds a new event to the calendar. Use this when the user wants to schedule something.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "title": {
+                "type": "STRING",
+                "description": "The title or name of the event."
+            },
+            "time": {
+                "type": "STRING",
+                "description": "The time of the event (e.g., '10:00 AM', '2:00 PM')."
+            },
+            "date": {
+                "type": "STRING",
+                "description": "The date of the event in YYYY-MM-DD format. If not provided, defaults to today."
+            },
+            "description": {
+                "type": "STRING",
+                "description": "Optional description or details about the event."
+            }
+        },
+        "required": ["title", "time"]
+    }
+}
+
+tools = [{'google_search': {}}, {"function_declarations": [generate_cad, run_web_agent, create_project_tool, switch_project_tool, list_projects_tool, list_smart_devices_tool, control_light_tool, discover_printers_tool, print_stl_tool, get_print_status_tool, iterate_cad_tool, shutdown_system_tool, add_todo_tool, get_todos_tool, complete_todo_tool, delete_todo_tool, get_calendar_events_tool, add_calendar_event_tool] + tools_list[0]['function_declarations'][1:]}]
 
 # --- CONFIG UPDATE: Enabled Transcription ---
 config = types.LiveConnectConfig(
@@ -192,7 +294,8 @@ config = types.LiveConnectConfig(
         "You have a witty and charming personality. "
         "Your creator is Naz, and you address him as 'Sir'. "
         "When answering, respond using complete and concise sentences to keep a quick pacing and keep the conversation flowing. "
-        "You have a fun personality.",
+        "You have a fun personality. "
+        "IMPORTANT: If the user says 'jarvis shut down' or 'jarvis shutdown', you must immediately call the shutdown_system function to close the application gracefully.",
     tools=tools,
     speech_config=types.SpeechConfig(
         voice_config=types.VoiceConfig(
@@ -203,7 +306,7 @@ config = types.LiveConnectConfig(
     )
 )
 
-pya = pyaudio.PyAudio()
+# No global audio instance needed with sounddevice
 
 from cad_agent import CadAgent
 from web_agent import WebAgent
@@ -211,7 +314,7 @@ from kasa_agent import KasaAgent
 from printer_agent import PrinterAgent
 
 class AudioLoop:
-    def __init__(self, video_mode=DEFAULT_MODE, on_audio_data=None, on_video_frame=None, on_cad_data=None, on_web_data=None, on_transcription=None, on_tool_confirmation=None, on_cad_status=None, on_cad_thought=None, on_project_update=None, on_device_update=None, on_error=None, input_device_index=None, input_device_name=None, output_device_index=None, kasa_agent=None):
+    def __init__(self, video_mode=DEFAULT_MODE, on_audio_data=None, on_video_frame=None, on_cad_data=None, on_web_data=None, on_transcription=None, on_tool_confirmation=None, on_cad_status=None, on_cad_thought=None, on_project_update=None, on_device_update=None, on_error=None, on_todo_update=None, on_calendar_update=None, input_device_index=None, input_device_name=None, output_device_index=None, kasa_agent=None):
         self.video_mode = video_mode
         self.on_audio_data = on_audio_data
         self.on_video_frame = on_video_frame
@@ -224,6 +327,8 @@ class AudioLoop:
         self.on_project_update = on_project_update
         self.on_device_update = on_device_update
         self.on_error = on_error
+        self.on_todo_update = on_todo_update
+        self.on_calendar_update = on_calendar_update
         self.input_device_index = input_device_index
         self.input_device_name = input_device_name
         self.output_device_index = output_device_index
@@ -265,6 +370,7 @@ class AudioLoop:
         
         self.permissions = {} # Default Empty (Will treat unset as True)
         self._pending_confirmations = {}
+        self._reset_agent_task = None  # Task for resetting agent speaking state
 
         # Video buffering state
         self._latest_image_payload = None
@@ -280,6 +386,10 @@ class AudioLoop:
         # If jarvis.py is in backend/, project root is one up
         project_root = os.path.dirname(current_dir)
         self.project_manager = ProjectManager(project_root)
+        
+        # Storage for todos and calendar events
+        self._todos_cache = []
+        self._calendar_events_cache = []
         
         # Sync Initial Project State
         if self.on_project_update:
@@ -348,30 +458,23 @@ class AudioLoop:
             await self.session.send(input=msg, end_of_turn=False)
 
     async def listen_audio(self):
-        mic_info = pya.get_default_input_device_info()
-
         # Resolve Input Device by Name if provided
         resolved_input_device_index = None
         
         if self.input_device_name:
             print(f"[JARVIS] Attempting to find input device matching: '{self.input_device_name}'")
-            count = pya.get_device_count()
+            devices = sd.query_devices()
             best_match = None
             
-            for i in range(count):
-                try:
-                    info = pya.get_device_info_by_index(i)
-                    if info['maxInputChannels'] > 0:
-                        name = info.get('name', '')
-                        # Simple case-insensitive check
-                        if self.input_device_name.lower() in name.lower() or name.lower() in self.input_device_name.lower():
-                             print(f"   Candidate {i}: {name}")
-                             # Prioritize exact match or very close match if possible, but first match is okay for now
-                             resolved_input_device_index = i
-                             best_match = name
-                             break
-                except Exception:
-                    continue
+            for i, device in enumerate(devices):
+                if device['max_input_channels'] > 0:
+                    name = device.get('name', '')
+                    # Simple case-insensitive check
+                    if self.input_device_name.lower() in name.lower() or name.lower() in self.input_device_name.lower():
+                         print(f"   Candidate {i}: {name}")
+                         resolved_input_device_index = i
+                         best_match = name
+                         break
             
             if resolved_input_device_index is not None:
                 print(f"[JARVIS] Resolved input device '{self.input_device_name}' to index {resolved_input_device_index} ({best_match})")
@@ -389,30 +492,96 @@ class AudioLoop:
 
         if resolved_input_device_index is None:
              print("[JARVIS] Using Default Input Device")
+             resolved_input_device_index = sd.default.device[0]  # Default input device
 
-        try:
-            self.audio_stream = await asyncio.to_thread(
-                pya.open,
-                format=FORMAT,
-                channels=CHANNELS,
-                rate=SEND_SAMPLE_RATE,
-                input=True,
-                input_device_index=resolved_input_device_index if resolved_input_device_index is not None else mic_info["index"],
-                frames_per_buffer=CHUNK_SIZE,
-            )
-        except OSError as e:
-            print(f"[JARVIS] [ERR] Failed to open audio input stream: {e}")
-            print("[JARVIS] [WARN] Audio features will be disabled. Please check microphone permissions.")
-            return
-
-        if __debug__:
-            kwargs = {"exception_on_overflow": False}
-        else:
-            kwargs = {}
-        
         # VAD Constants
         VAD_THRESHOLD = 800 # Adj based on mic sensitivity (800 is conservative for 16-bit)
         SILENCE_DURATION = 0.5 # Seconds of silence to consider "done speaking"
+        
+        # Track user speaking state for feedback prevention
+        self._user_speaking = False
+        self._user_speech_end_time = None
+        
+        # Track agent speaking state to prevent self-interruption
+        self._agent_speaking = False
+        self._agent_speech_start_time = None
+        self._agent_speech_end_time = None
+        
+        # Echo cancellation: Keep track of recent output audio for cancellation
+        self._output_audio_buffer = []
+        self._output_buffer_size = int(SEND_SAMPLE_RATE * 0.1)  # 100ms buffer
+        
+        # Queue for passing audio from callback to async loop
+        self._audio_queue = queue.Queue(maxsize=10)
+        
+        def audio_callback(indata, frames, time_info, status):
+            """Callback for sounddevice input stream"""
+            if status:
+                print(f"[JARVIS] Audio input status: {status}")
+            
+            # Convert numpy array to bytes (indata is float32, convert to int16)
+            audio_clipped = np.clip(indata, -1.0, 1.0)
+            audio_int16 = (audio_clipped * 32767).astype(np.int16)
+            audio_bytes = audio_int16.tobytes()
+            
+            # Enhanced echo cancellation: if we're playing audio, suppress input significantly
+            if hasattr(self, '_is_playing_audio') and self._is_playing_audio:
+                # Mark agent as speaking
+                if not hasattr(self, '_agent_speaking') or not self._agent_speaking:
+                    self._agent_speaking = True
+                    self._agent_speech_start_time = time.time()
+                # Reduce input volume by 95% when output is active (aggressive ducking to prevent feedback)
+                audio_int16 = (audio_int16 * 0.05).astype(np.int16)
+                audio_bytes = audio_int16.tobytes()
+                # Set RMS to very low to prevent VAD triggering
+                rms = 0
+            else:
+                # Agent stopped speaking - track end time
+                if hasattr(self, '_agent_speaking') and self._agent_speaking:
+                    self._agent_speech_end_time = time.time()
+            
+            # Calculate RMS for VAD
+            if len(audio_int16) > 0:
+                sum_squares = np.sum(audio_int16.astype(np.int32) ** 2)
+                rms = int(math.sqrt(sum_squares / len(audio_int16)))
+            else:
+                rms = 0
+            
+            # Put in queue for async processing (non-blocking)
+            try:
+                self._audio_queue.put_nowait({
+                    'data': audio_bytes,
+                    'rms': rms,
+                    'timestamp': time.time()
+                })
+            except queue.Full:
+                # Drop oldest if queue is full
+                try:
+                    self._audio_queue.get_nowait()
+                    self._audio_queue.put_nowait({
+                        'data': audio_bytes,
+                        'rms': rms,
+                        'timestamp': time.time()
+                    })
+                except:
+                    pass
+        
+        try:
+            # Create input stream with sounddevice
+            self.input_stream = sd.InputStream(
+                device=resolved_input_device_index,
+                channels=CHANNELS,
+                samplerate=SEND_SAMPLE_RATE,
+                blocksize=CHUNK_SIZE,
+                dtype=np.float32,  # Use float32 internally
+                callback=audio_callback
+            )
+            self.input_stream.start()
+            print(f"[JARVIS] Audio input stream started on device {resolved_input_device_index}")
+        except Exception as e:
+            print(f"[JARVIS] [ERR] Failed to open audio input stream: {e}")
+            print("[JARVIS] [WARN] Audio features will be disabled. Please check microphone permissions.")
+            return
         
         while True:
             if self.paused:
@@ -420,26 +589,40 @@ class AudioLoop:
                 continue
 
             try:
-                data = await asyncio.to_thread(self.audio_stream.read, CHUNK_SIZE, **kwargs)
+                # Get audio data from queue (non-blocking)
+                try:
+                    audio_info = self._audio_queue.get_nowait()
+                except queue.Empty:
+                    await asyncio.sleep(0.01)
+                    continue
+                
+                data = audio_info['data']
+                rms = audio_info['rms']
                 
                 # 1. Send Audio
                 if self.out_queue:
                     await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
                 
                 # 2. VAD Logic for Video
-                # rms = audioop.rms(data, 2)
-                # Replacement for audioop.rms(data, 2)
-                count = len(data) // 2
-                if count > 0:
-                    shorts = struct.unpack(f"<{count}h", data)
-                    sum_squares = sum(s**2 for s in shorts)
-                    rms = int(math.sqrt(sum_squares / count))
-                else:
-                    rms = 0
+                # Skip VAD if agent is speaking or recently stopped speaking (prevent self-interruption)
+                if hasattr(self, '_agent_speaking') and self._agent_speaking:
+                    # Check if enough time has passed since agent stopped speaking
+                    if hasattr(self, '_agent_speech_end_time') and self._agent_speech_end_time:
+                        time_since_agent_stopped = time.time() - self._agent_speech_end_time
+                        if time_since_agent_stopped < 1.0:  # Wait 1 second after agent stops before accepting input
+                            continue  # Skip processing this audio chunk
+                        else:
+                            # Reset agent speaking state after silence period
+                            self._agent_speaking = False
+                            self._agent_speech_end_time = None
+                    else:
+                        continue  # Agent is still speaking, skip
                 
                 if rms > VAD_THRESHOLD:
                     # Speech Detected
                     self._silence_start_time = None
+                    self._user_speaking = True  # Mark user as speaking to prevent feedback
+                    self._user_speech_end_time = None
                     
                     if not self._is_speaking:
                         # NEW Speech Utterance Started
@@ -463,10 +646,22 @@ class AudioLoop:
                             print(f"[JARVIS DEBUG] [VAD] Silence detected. Resetting speech state.")
                             self._is_speaking = False
                             self._silence_start_time = None
+                            # Mark user as done speaking, but keep flag for a bit longer to prevent immediate feedback
+                            self._user_speech_end_time = time.time()
+                    else:
+                        # Not speaking, check if enough time has passed since last speech
+                        if self._user_speech_end_time and time.time() - self._user_speech_end_time > 0.5:
+                            self._user_speaking = False
+                            self._user_speech_end_time = None
 
             except Exception as e:
                 print(f"Error reading audio: {e}")
                 await asyncio.sleep(0.1)
+        
+        # Cleanup
+        if hasattr(self, 'input_stream'):
+            self.input_stream.stop()
+            self.input_stream.close()
 
     async def handle_cad_request(self, prompt):
         print(f"[JARVIS DEBUG] [CAD] Background Task Started: handle_cad_request('{prompt}')")
@@ -665,6 +860,15 @@ class AudioLoop:
                                     if delta:
                                         # User is speaking, so interrupt model playback!
                                         self.clear_audio_queue()
+                                        # Mark user as speaking to prevent feedback
+                                        self._user_speaking = True
+                                        self._user_speech_end_time = None
+                                        # Reset flag after a short delay to allow audio playback
+                                        async def reset_user_speaking():
+                                            await asyncio.sleep(0.5)
+                                            self._user_speaking = False
+                                            self._user_speech_end_time = time.time()
+                                        asyncio.create_task(reset_user_speaking())
 
                                         # Send to frontend (Streaming)
                                         if self.on_transcription:
@@ -718,7 +922,7 @@ class AudioLoop:
                         print("The tool was called")
                         function_responses = []
                         for fc in response.tool_call.function_calls:
-                            if fc.name in ["generate_cad", "run_web_agent", "write_file", "read_directory", "read_file", "create_project", "switch_project", "list_projects", "list_smart_devices", "control_light", "discover_printers", "print_stl", "get_print_status", "iterate_cad"]:
+                            if fc.name in ["generate_cad", "run_web_agent", "write_file", "read_directory", "read_file", "create_project", "switch_project", "list_projects", "list_smart_devices", "control_light", "discover_printers", "print_stl", "get_print_status", "iterate_cad", "shutdown_system", "add_todo", "get_todos", "complete_todo", "delete_todo", "get_calendar_events", "add_calendar_event"]:
                                 prompt = fc.args.get("prompt", "") # Prompt is not present for all tools
                                 
                                 # Check Permissions (Default to True if not set)
@@ -1109,6 +1313,137 @@ class AudioLoop:
                                         id=fc.id, name=fc.name, response={"result": result_str}
                                     )
                                     function_responses.append(function_response)
+
+                                elif fc.name == "shutdown_system":
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'shutdown_system' - Initiating graceful shutdown")
+                                    
+                                    # Send response first
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": "Shutting down JARVIS system..."}
+                                    )
+                                    function_responses.append(function_response)
+                                    
+                                    # Stop the audio loop
+                                    self.stop()
+                                    
+                                    # Emit shutdown signal to server
+                                    # We'll use a socket event to trigger server shutdown
+                                    # For now, we'll use the on_error callback to signal shutdown
+                                    if self.on_error:
+                                        self.on_error("SHUTDOWN_REQUESTED")
+                                    
+                                    # Schedule shutdown after a brief delay to allow response to be sent
+                                    async def delayed_shutdown():
+                                        await asyncio.sleep(1)
+                                        import os
+                                        os._exit(0)
+                                    
+                                    asyncio.create_task(delayed_shutdown())
+
+                                elif fc.name == "add_todo":
+                                    task = fc.args["task"]
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'add_todo' Task='{task}'")
+                                    
+                                    # Emit socket event to add todo
+                                    if self.on_todo_update:
+                                        self.on_todo_update({"action": "add", "task": task})
+                                    
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": f"Added task '{task}' to your to-do list."}
+                                    )
+                                    function_responses.append(function_response)
+
+                                elif fc.name == "get_todos":
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'get_todos'")
+                                    
+                                    # Request todos from frontend via socket
+                                    if self.on_todo_update:
+                                        self.on_todo_update({"action": "get"})
+                                    
+                                    # Format todos for response
+                                    if self._todos_cache:
+                                        todo_list = []
+                                        for i, todo in enumerate(self._todos_cache, 1):
+                                            status = "✓" if todo.get("completed", False) else "○"
+                                            todo_list.append(f"{i}. {status} {todo.get('text', 'Unknown task')}")
+                                        result_str = "Your to-do list:\n" + "\n".join(todo_list)
+                                    else:
+                                        result_str = "Your to-do list is empty."
+                                    
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": result_str}
+                                    )
+                                    function_responses.append(function_response)
+
+                                elif fc.name == "complete_todo":
+                                    task_id = fc.args["task_id"]
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'complete_todo' TaskID={task_id}")
+                                    
+                                    # Emit socket event to complete todo
+                                    if self.on_todo_update:
+                                        self.on_todo_update({"action": "complete", "task_id": task_id})
+                                    
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": f"Marked task {task_id} as completed."}
+                                    )
+                                    function_responses.append(function_response)
+
+                                elif fc.name == "delete_todo":
+                                    task_id = fc.args["task_id"]
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'delete_todo' TaskID={task_id}")
+                                    
+                                    # Emit socket event to delete todo
+                                    if self.on_todo_update:
+                                        self.on_todo_update({"action": "delete", "task_id": task_id})
+                                    
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": f"Deleted task {task_id} from your to-do list."}
+                                    )
+                                    function_responses.append(function_response)
+
+                                elif fc.name == "get_calendar_events":
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'get_calendar_events'")
+                                    
+                                    # Request calendar events from frontend via socket
+                                    if self.on_calendar_update:
+                                        self.on_calendar_update({"action": "get"})
+                                    
+                                    # Format calendar events for response
+                                    if self._calendar_events_cache:
+                                        event_list = []
+                                        for event in self._calendar_events_cache:
+                                            event_list.append(f"- {event.get('title', 'Untitled')} at {event.get('time', 'Unknown time')} on {event.get('date', 'Unknown date')}")
+                                        result_str = "Your calendar events for today:\n" + "\n".join(event_list)
+                                    else:
+                                        result_str = "You have no calendar events scheduled for today."
+                                    
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": result_str}
+                                    )
+                                    function_responses.append(function_response)
+
+                                elif fc.name == "add_calendar_event":
+                                    title = fc.args["title"]
+                                    time_str = fc.args["time"]
+                                    date_str = fc.args.get("date")
+                                    description = fc.args.get("description", "")
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'add_calendar_event' Title='{title}' Time='{time_str}'")
+                                    
+                                    # Emit socket event to add calendar event
+                                    if self.on_calendar_update:
+                                        self.on_calendar_update({
+                                            "action": "add",
+                                            "title": title,
+                                            "time": time_str,
+                                            "date": date_str,
+                                            "description": description
+                                        })
+                                    
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": f"Added event '{title}' to your calendar for {time_str}."}
+                                    )
+                                    function_responses.append(function_response)
+                                    
                         if function_responses:
                             await self.session.send_tool_response(function_responses=function_responses)
                 
@@ -1124,19 +1459,90 @@ class AudioLoop:
             raise e
 
     async def play_audio(self):
-        stream = await asyncio.to_thread(
-            pya.open,
-            format=FORMAT,
-            channels=CHANNELS,
-            rate=RECEIVE_SAMPLE_RATE,
-            output=True,
-            output_device_index=self.output_device_index,
-        )
+        # Initialize output stream
+        try:
+            output_device = self.output_device_index if self.output_device_index is not None else sd.default.device[1]  # Default output device
+            self.output_stream = sd.OutputStream(
+                device=output_device,
+                channels=CHANNELS,
+                samplerate=RECEIVE_SAMPLE_RATE,
+                dtype=FORMAT,
+                blocksize=CHUNK_SIZE
+            )
+            self.output_stream.start()
+            print(f"[JARVIS] Audio output stream started on device {output_device}")
+        except Exception as e:
+            print(f"[JARVIS] [ERR] Failed to open audio output stream: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+        
+        self._is_playing_audio = False
+        
         while True:
             bytestream = await self.audio_in_queue.get()
             if self.on_audio_data:
                 self.on_audio_data(bytestream)
-            await asyncio.to_thread(stream.write, bytestream)
+            
+            # Prevent feedback loop: pause audio output when user is speaking
+            # Check if user speech was recently detected (within last 0.5 seconds)
+            if hasattr(self, '_user_speaking') and self._user_speaking:
+                # Check if enough time has passed since user stopped speaking
+                if hasattr(self, '_user_speech_end_time') and self._user_speech_end_time:
+                    if time.time() - self._user_speech_end_time > 0.5:
+                        self._user_speaking = False
+                        self._user_speech_end_time = None
+                    else:
+                        # Skip this audio chunk to prevent feedback
+                        continue
+                else:
+                    # Skip this audio chunk to prevent feedback
+                    continue
+            
+            # Mark agent as speaking when we start playing audio
+            if not hasattr(self, '_agent_speaking') or not self._agent_speaking:
+                self._agent_speaking = True
+                self._agent_speech_start_time = time.time()
+            
+            # Convert bytes to numpy array and play
+            try:
+                audio_array = np.frombuffer(bytestream, dtype=np.int16)
+                self._is_playing_audio = True
+                await asyncio.to_thread(self.output_stream.write, audio_array)
+                self._is_playing_audio = False
+                
+                # Update agent speaking end time - this will be checked in listen_audio
+                self._agent_speech_end_time = time.time()
+                
+                # Schedule reset of agent speaking state after a delay
+                async def reset_agent_speaking():
+                    await asyncio.sleep(1.0)  # Wait 1 second after last audio chunk
+                    # Only reset if no new audio has come in
+                    if hasattr(self, '_agent_speech_end_time') and self._agent_speech_end_time:
+                        if time.time() - self._agent_speech_end_time >= 1.0:
+                            self._agent_speaking = False
+                            self._agent_speech_end_time = None
+                            print(f"[JARVIS DEBUG] [AUDIO] Agent speaking state reset after silence period")
+                
+                # Cancel previous reset task if exists
+                if hasattr(self, '_reset_agent_task') and self._reset_agent_task:
+                    self._reset_agent_task.cancel()
+                
+                # Create new reset task
+                self._reset_agent_task = asyncio.create_task(reset_agent_speaking())
+            except Exception as e:
+                print(f"[JARVIS] Error playing audio: {e}")
+                self._is_playing_audio = False
+                # Reset agent speaking state on error
+                if hasattr(self, '_agent_speech_end_time') and self._agent_speech_end_time:
+                    # Wait a bit after error before resetting
+                    if time.time() - self._agent_speech_end_time > 0.8:
+                        self._agent_speaking = False
+        
+        # Cleanup
+        if hasattr(self, 'output_stream'):
+            self.output_stream.stop()
+            self.output_stream.close()
 
     async def get_frames(self):
         cap = await asyncio.to_thread(cv2.VideoCapture, 0, cv2.CAP_AVFOUNDATION)
@@ -1266,25 +1672,27 @@ class AudioLoop:
                         pass
 
 def get_input_devices():
-    p = pyaudio.PyAudio()
-    info = p.get_host_api_info_by_index(0)
-    numdevices = info.get('deviceCount')
+    """Get list of available input audio devices using sounddevice"""
     devices = []
-    for i in range(0, numdevices):
-        if (p.get_device_info_by_host_api_device_index(0, i).get('maxInputChannels')) > 0:
-            devices.append((i, p.get_device_info_by_host_api_device_index(0, i).get('name')))
-    p.terminate()
+    try:
+        all_devices = sd.query_devices()
+        for i, device in enumerate(all_devices):
+            if device['max_input_channels'] > 0:
+                devices.append((i, device['name']))
+    except Exception as e:
+        print(f"[JARVIS] Error querying input devices: {e}")
     return devices
 
 def get_output_devices():
-    p = pyaudio.PyAudio()
-    info = p.get_host_api_info_by_index(0)
-    numdevices = info.get('deviceCount')
+    """Get list of available output audio devices using sounddevice"""
     devices = []
-    for i in range(0, numdevices):
-        if (p.get_device_info_by_host_api_device_index(0, i).get('maxOutputChannels')) > 0:
-            devices.append((i, p.get_device_info_by_host_api_device_index(0, i).get('name')))
-    p.terminate()
+    try:
+        all_devices = sd.query_devices()
+        for i, device in enumerate(all_devices):
+            if device['max_output_channels'] > 0:
+                devices.append((i, device['name']))
+    except Exception as e:
+        print(f"[JARVIS] Error querying output devices: {e}")
     return devices
 
 if __name__ == "__main__":
