@@ -1,4 +1,4 @@
-# J.A.R.V.I.S V2 - Just A Rather Very Intelligent System
+# J.A.R.V.I.S V3 - Just A Rather Very Intelligent System
 
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11-blue?logo=python)
 ![React](https://img.shields.io/badge/React-18.2-61DAFB?logo=react)
