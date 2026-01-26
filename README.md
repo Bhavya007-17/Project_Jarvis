@@ -12,6 +12,22 @@ JARVIS V2 is a sophisticated AI assistant designed for multimodal interaction. I
 
 ---
 
+## 🆕 Recent Updates
+
+### Latest Features & Improvements
+- **🔊 Wake Word Listener**: Voice-activated startup with "Jarvis" wake word—no need to manually launch the app!
+- **📅 Calendar & Todo Integration**: Full Google Calendar and Todo list management via voice commands
+- **🪟 Windows Startup Scripts**: Convenient PowerShell scripts (`start_jarvis.ps1`, `start_backend.ps1`) for easy launching
+- **📚 Enhanced Documentation**: 
+  - [INSTALL_AND_RUN.md](INSTALL_AND_RUN.md) - Comprehensive installation guide
+  - [FIX_PYAUDIO.md](FIX_PYAUDIO.md) - PyAudio troubleshooting
+  - [PYAUDIO_PYTHON314_SOLUTION.md](PYAUDIO_PYTHON314_SOLUTION.md) - Python 3.14+ compatibility solutions
+  - [WINDOWS_FIX.md](WINDOWS_FIX.md) - Windows-specific fixes
+- **🔧 PyAudio Alternatives**: Wake word listener uses `sounddevice` instead of PyAudio (no PyAudio installation required)
+- **🛡️ Security Improvements**: `settings.json` now excluded from Git to protect local network information
+
+---
+
 ## 🌟 Capabilities at a Glance
 
 | Feature | Description | Technology |
@@ -26,6 +42,7 @@ JARVIS V2 is a sophisticated AI assistant designed for multimodal interaction. I
 | **📁 Project Memory** | Persistent context across sessions | File-based JSON storage |
 | **📅 Google Calendar** | Check and manage your calendar events | Google Calendar API |
 | **✅ Todo List** | Manage your tasks and to-do items | REST API integration |
+| **🔊 Wake Word** | Voice-activated startup with "Jarvis" wake word | Speech Recognition + sounddevice |
 
 ### 🖐️ Gesture Control Details
 
@@ -85,7 +102,7 @@ graph TB
 
 ```bash
 # 1. Clone and enter
-git clone https://github.com/nazirlouis/ada_v2.git && cd ada_v2
+git clone https://github.com/Bhavya007-17/Project_Jarvis.git && cd Project_Jarvis
 
 # 2. Create Python environment (Python 3.11)
 conda create -n ada_v2 python=3.11 -y && conda activate ada_v2
@@ -128,14 +145,14 @@ If you have never coded before, follow these steps first!
 1. Open your terminal (or Command Prompt on Windows).
 2. Type this command and hit Enter:
    ```bash
-   git clone https://github.com/nazirlouis/ada_v2.git
+   git clone https://github.com/Bhavya007-17/Project_Jarvis.git
    ```
-3. This creates a folder named `ada_v2`.
+3. This creates a folder named `Project_Jarvis`.
 
 **Step 5: Open in VS Code**
 1. Open VS Code.
 2. Go to **File > Open Folder**.
-3. Select the `ada_v2` folder you just downloaded.
+3. Select the `Project_Jarvis` folder you just downloaded.
 4. Open the internal terminal: Press `Ctrl + ~` (tilde) or go to **Terminal > New Terminal**.
 
 ---
@@ -153,6 +170,7 @@ brew install portaudio
 
 **Windows:**
 - No additional system dependencies required!
+- **Note**: If you encounter PyAudio installation issues with Python 3.14+, see [FIX_PYAUDIO.md](FIX_PYAUDIO.md) or [PYAUDIO_PYTHON314_SOLUTION.md](PYAUDIO_PYTHON314_SOLUTION.md) for solutions.
 
 ### 2. Python Environment
 Create a single Python 3.11 environment:
@@ -293,12 +311,12 @@ JARVIS uses Google's Gemini API for voice and intelligence. You need a free API 
 
 ## 🚀 Running JARVIS V2
 
-You have two options to run the app. Ensure your `ada_v2` environment is active!
+You have several options to run the app. Ensure your `ada_v2` (or `jarvis_v2`) environment is active!
 
 ### Option 1: The "Easy" Way (Single Terminal)
 The app is smart enough to start the backend for you.
 1. Open your terminal in the project folder.
-2. Activate your environment: `conda activate ada_v2`
+2. Activate your environment: `conda activate ada_v2` (or `jarvis_v2`)
 3. Run:
    ```bash
    npm run dev
@@ -319,6 +337,36 @@ python backend/server.py
 # Environment doesn't matter here, but keep it simple
 npm run dev
 ```
+
+### Option 3: Windows Startup Scripts (Recommended for Windows)
+For Windows users, use the provided PowerShell scripts to ensure the correct Python environment is used:
+
+**Start Everything:**
+```powershell
+.\start_jarvis.ps1
+```
+
+**Start Backend Only (for debugging):**
+```powershell
+.\start_backend.ps1
+```
+
+> **Note**: These scripts automatically use the correct conda Python path. Edit the scripts if your conda installation is in a different location.
+
+### Option 4: Wake Word Listener (Background Mode)
+Run JARVIS in the background and wake it with your voice:
+
+```bash
+conda activate ada_v2
+python wake_word_listener.py
+```
+
+- Say **"Jarvis"** to start the application
+- Say **"Jarvis shut down"** to close the application
+- Runs continuously in the background
+- Uses `sounddevice` instead of PyAudio (no PyAudio installation required)
+
+> **Note**: The wake word listener checks if JARVIS is already running before launching a new instance.
 
 ---
 
@@ -346,6 +394,10 @@ npm run dev
 - "Schedule a meeting tomorrow at 2 PM"
 - "Add [task] to my to-do list"
 - "Show my to-do list"
+
+### 🔊 Wake Word Commands
+- **"Jarvis"** — Starts the application (when using wake word listener)
+- **"Jarvis shut down"** — Closes the application gracefully
 
 ### 🧊 3D CAD
 - **Prompt**: "Create a 3D model of a hex bolt."
@@ -444,6 +496,35 @@ This is a server-side issue from the Gemini API. Simply reconnect by clicking th
 
 ---
 
+### PyAudio Installation Issues (Windows / Python 3.14+)
+**Symptoms**: `pip install pyaudio` fails with compilation errors or missing wheels.
+
+**Solution**:
+1. **See detailed guides**: Check [FIX_PYAUDIO.md](FIX_PYAUDIO.md) or [PYAUDIO_PYTHON314_SOLUTION.md](PYAUDIO_PYTHON314_SOLUTION.md) for comprehensive solutions.
+2. **Alternative**: Use the wake word listener (`wake_word_listener.py`) which uses `sounddevice` instead of PyAudio—no PyAudio installation needed!
+3. **Quick fix**: Install PyAudio separately after other requirements:
+   ```powershell
+   pip install --user pyaudio
+   ```
+4. **For Python 3.14+**: Consider using Python 3.11 instead, or use the wake word listener as an alternative.
+
+---
+
+### Wrong Python Version Being Used (Windows)
+**Symptoms**: Import errors, "module not found" even after installation, or Python 3.14 being used instead of conda Python 3.11.
+
+**Solution**:
+1. **Use startup scripts**: Use `start_jarvis.ps1` or `start_backend.ps1` which ensure the correct Python is used.
+2. **Manual fix**: Always activate conda environment before running:
+   ```powershell
+   conda activate ada_v2
+   python --version  # Should show 3.11.x
+   ```
+3. **Check PATH**: Ensure conda Python is in your PATH before system Python.
+4. **See**: [INSTALL_AND_RUN.md](INSTALL_AND_RUN.md) for detailed Windows setup instructions.
+
+---
+
 ## 📸 What It Looks Like
 
 *Coming soon! Screenshots and demo videos will be added here.*
@@ -470,7 +551,9 @@ Project_Jarvis/
 │   └── config.json             # Todo API and other settings
 ├── src/                        # React frontend
 │   ├── App.jsx                 # Main application component
-│   ├── components/             # UI components (11 files)
+│   ├── components/             # UI components
+│   │   ├── CalendarTodoPanel.jsx  # Calendar & Todo integration
+│   │   └── ...                 # Other UI components
 │   └── index.css               # Global styles
 ├── electron/                   # Electron main process
 │   └── main.js                 # Window & IPC setup
@@ -478,6 +561,14 @@ Project_Jarvis/
 ├── .env                        # API keys (create this!)
 ├── requirements.txt            # Python dependencies
 ├── package.json                # Node.js dependencies
+├── wake_word_listener.py       # Wake word detection (background mode)
+├── start_jarvis.ps1           # Windows startup script (full app)
+├── start_backend.ps1           # Windows startup script (backend only)
+├── install_without_pyaudio.bat # Alternative installation script
+├── INSTALL_AND_RUN.md          # Detailed installation guide
+├── FIX_PYAUDIO.md              # PyAudio troubleshooting guide
+├── PYAUDIO_PYTHON314_SOLUTION.md # Python 3.14 PyAudio solutions
+├── WINDOWS_FIX.md              # Windows-specific fixes
 └── README.md                   # You are here!
 ```
 
@@ -492,6 +583,7 @@ Project_Jarvis/
 | **Gemini API Quota** | Free tier has rate limits; heavy CAD iteration may hit limits. |
 | **Network Dependency** | Requires internet for Gemini API (no offline mode). |
 | **Single User** | Face auth recognizes one person (the `reference.jpg`). |
+| **PyAudio on Python 3.14+** | PyAudio may not have wheels for Python 3.14+. Use wake word listener as alternative or downgrade to Python 3.11. |
 
 ---
 
@@ -510,6 +602,9 @@ Contributions are welcome! Here's how:
 - Run the backend separately (`python backend/server.py`) to see Python logs.
 - Use `npm run dev` without Electron during frontend development (faster reload).
 - The `projects/` folder contains user data—don't commit it to Git.
+- **Windows users**: Use the provided PowerShell scripts (`start_jarvis.ps1`, `start_backend.ps1`) to avoid Python version conflicts.
+- **PyAudio issues?**: Use `wake_word_listener.py` as an alternative—it doesn't require PyAudio.
+- See [INSTALL_AND_RUN.md](INSTALL_AND_RUN.md) for detailed setup instructions.
 
 ---
 
@@ -521,9 +616,10 @@ Contributions are welcome! Here's how:
 | **Face Data** | Processed locally, never uploaded. |
 | **Tool Confirmations** | Write/CAD/Web actions can require user approval. |
 | **No Cloud Storage** | All project data stays on your machine. |
+| **Settings File** | `backend/settings.json` contains local network IPs and is excluded from Git. |
 
 > [!WARNING]
-> Never share your `.env` file or `reference.jpg`. These contain sensitive credentials and biometric data.
+> Never share your `.env` file or `reference.jpg`. These contain sensitive credentials and biometric data. The `settings.json` file is also excluded from version control as it may contain local network information.
 
 ---
 
