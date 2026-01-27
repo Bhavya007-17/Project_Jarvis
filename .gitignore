@@ -16,6 +16,10 @@ projects/
 output.stl
 cad_outputs/
 
+# Google Calendar OAuth credentials (sensitive)
+backend/credentials.json
+backend/token.pickle
+
 # Node.js
 node_modules/
 dist/

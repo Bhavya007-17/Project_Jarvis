@@ -314,8 +314,22 @@ class WebAgent:
                 response_parts = [types.Part(function_response=fr) for fr in function_responses]
                 chat_history.append(types.Content(role="user", parts=response_parts))
 
-            await self.browser.close()
-            print("[CLOSE] Browser closed.")
+            # Don't close browser immediately - keep it open for user to see results
+            # Only close if explicitly requested or after a delay
+            print("[INFO] Task completed. Browser will remain open for 30 seconds...")
+            print("[INFO] You can manually close the browser window when done.")
+            
+            # Wait 30 seconds before auto-closing (user can close manually before this)
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                pass
+            
+            # Only close if browser still exists
+            if self.browser:
+                await self.browser.close()
+                print("[CLOSE] Browser closed.")
+            
             return final_response
 
 if __name__ == "__main__":

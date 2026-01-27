@@ -345,6 +345,25 @@ async def start_audio(sid, data=None):
         
         print("Emitting 'J.A.R.V.I.S Started'")
         await sio.emit('status', {'msg': 'J.A.R.V.I.S Started'})
+        
+        # Fetch todos and calendar events from external APIs on startup
+        async def fetch_external_data():
+            # Fetch todos from external API
+            try:
+                from todo_api import fetch_todos_from_api
+                api_todos = fetch_todos_from_api()
+                if api_todos:
+                    print(f"[SERVER] Loaded {len(api_todos)} todos from external API on startup")
+                    audio_loop._todos_cache = api_todos
+                    # Send to frontend
+                    await sio.emit('todos_list', {'todos': api_todos})
+            except Exception as e:
+                print(f"[SERVER] Could not fetch todos from API: {e}")
+            
+            # Calendar events are fetched when frontend requests them
+        
+        # Fetch external data in background
+        asyncio.create_task(fetch_external_data())
 
         # Load saved printers
         saved_printers = SETTINGS.get("printers", [])
@@ -1023,36 +1042,50 @@ async def get_calendar_events(sid):
     print("Received get_calendar_events request")
     try:
         # Try to fetch from Google Calendar API
-        # For now, return placeholder events until OAuth is set up
-        # TODO: Implement Google Calendar API OAuth flow
-        
-        from datetime import datetime, timedelta
-        today = datetime.now().date()
-        tomorrow = today + timedelta(days=1)
-        
-        # Placeholder events - replace with actual API call
-        events = [
-            {
-                'id': 1,
-                'title': 'Meeting with Team',
-                'time': '10:00 AM',
-                'date': today.strftime('%Y-%m-%d'),
-                'description': 'Team sync meeting'
-            },
-            {
-                'id': 2,
-                'title': 'Project Review',
-                'time': '2:00 PM',
-                'date': today.strftime('%Y-%m-%d'),
-                'description': 'Quarterly project review'
-            }
-        ]
-        
-        await sio.emit('calendar_events', events, room=sid)
-        await sio.emit('status', {'msg': f'Loaded {len(events)} calendar events'})
+        try:
+            from google_calendar import fetch_google_calendar_events
+            print("[SERVER] Attempting to fetch Google Calendar events...")
+            events = fetch_google_calendar_events(max_results=50, days_ahead=30)
+            
+            if events and len(events) > 0:
+                print(f"[SERVER] Successfully fetched {len(events)} events from Google Calendar")
+                await sio.emit('calendar_events', events, room=sid)
+                await sio.emit('status', {'msg': f'Loaded {len(events)} calendar events from Google Calendar'})
+            else:
+                # No events found - could be empty calendar or API issue
+                print("[SERVER] No events returned from Google Calendar API")
+                await sio.emit('status', {'msg': 'Google Calendar connected but no events found for the next 30 days'})
+                # Still send empty array so frontend knows API is working
+                await sio.emit('calendar_events', [], room=sid)
+                
+        except ImportError as e:
+            # Google Calendar not set up - use placeholder
+            print(f"[SERVER] Google Calendar not configured (ImportError: {e})")
+            from datetime import datetime
+            today = datetime.now().date()
+            events = [
+                {
+                    'id': 'placeholder-1',
+                    'title': 'Set up Google Calendar',
+                    'time': '--',
+                    'date': today.strftime('%Y-%m-%d'),
+                    'description': 'See GOOGLE_CALENDAR_SETUP.md for instructions. Install: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib'
+                }
+            ]
+            await sio.emit('calendar_events', events, room=sid)
+            await sio.emit('status', {'msg': 'Google Calendar not configured - see setup instructions'})
+        except Exception as e:
+            print(f"[SERVER] Error fetching Google Calendar events: {e}")
+            import traceback
+            traceback.print_exc()
+            # Send error message but don't crash
+            await sio.emit('error', {'msg': f"Calendar API error: {str(e)}"}, room=sid)
+            await sio.emit('calendar_events', [], room=sid)
         
     except Exception as e:
         print(f"Error fetching calendar events: {e}")
+        import traceback
+        traceback.print_exc()
         await sio.emit('error', {'msg': f"Failed to fetch calendar events: {str(e)}"})
 
 @sio.event
@@ -1066,18 +1099,47 @@ async def todo_update(sid, data):
 
 @sio.event
 async def get_todos(sid):
-    """Get current todo list from frontend."""
-    print("Received get_todos request")
-    # Request todos from frontend - frontend will emit 'todos_list' with the data
+    """Get current todo list - try external API first, then fallback to frontend."""
+    print("[SERVER] Received get_todos request")
+    
+    # Try to fetch from external API
+    try:
+        from todo_api import fetch_todos_from_api
+        print("[SERVER] Attempting to fetch todos from external API...")
+        api_todos = fetch_todos_from_api()
+        
+        if api_todos and len(api_todos) > 0:
+            print(f"[SERVER] Successfully fetched {len(api_todos)} todos from external API")
+            # Update agent cache
+            if audio_loop:
+                audio_loop._todos_cache = api_todos
+            # Send to frontend
+            await sio.emit('todos_list', {'todos': api_todos}, room=sid)
+            await sio.emit('status', {'msg': f'Loaded {len(api_todos)} todos from external API'})
+            return
+        else:
+            print("[SERVER] No todos returned from external API (empty or not configured)")
+    except ImportError:
+        print("[SERVER] Todo API module not available (not configured)")
+        pass  # API not configured
+    except Exception as e:
+        print(f"[SERVER] Error fetching todos from API: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    # Fallback: Request todos from frontend (localStorage)
+    print("[SERVER] Requesting todos from frontend (localStorage)")
     await sio.emit('request_todos', {}, room=sid)
 
 @sio.event
 async def todos_list(sid, data):
     """Receive todo list from frontend and update agent cache."""
-    print(f"Received todos_list: {len(data.get('todos', []))} todos")
+    print(f"[SERVER] Received todos_list: {len(data.get('todos', []))} todos")
     # Update the audio loop's todo cache
     if audio_loop:
         audio_loop._todos_cache = data.get('todos', [])
+    # Also broadcast to all clients (in case frontend needs it)
+    await sio.emit('todos_list', data, room=sid)
 
 @sio.event
 async def calendar_update(sid, data):

@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, CheckSquare, X, Plus } from 'lucide-react';
+import { Calendar, CheckSquare, X, Plus, List, Grid } from 'lucide-react';
 
 const CalendarTodoPanel = ({ socket, position, onClose, onMouseDown, activeDragElement, zIndex }) => {
     const [calendarEvents, setCalendarEvents] = useState([]);
     const [todos, setTodos] = useState([]);
     const [newTodo, setNewTodo] = useState('');
     const [loading, setLoading] = useState(false);
+    const [viewMode, setViewMode] = useState('list'); // 'list' or 'calendar'
+    const [currentMonth, setCurrentMonth] = useState(new Date());
 
     // Load todos from localStorage on mount
     useEffect(() => {
@@ -46,17 +48,62 @@ const CalendarTodoPanel = ({ socket, position, onClose, onMouseDown, activeDragE
 
         // Set up socket listener for calendar events
         const handleCalendarEvents = (events) => {
-            // Format events for display
-            const formattedEvents = events.map(event => ({
-                id: event.id,
-                title: event.title,
-                time: event.time || new Date(event.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                date: event.date ? new Date(event.date).toLocaleDateString() : new Date().toLocaleDateString(),
-                description: event.description || ''
-            }));
+            console.log('[CALENDAR] Received events:', events);
+            
+            if (!events || events.length === 0) {
+                console.log('[CALENDAR] No events received');
+                setCalendarEvents([]);
+                return;
+            }
+            
+            // Format events for display - preserve original date format for calendar view
+            const formattedEvents = events.map(event => {
+                // Try to parse the date - handle both ISO strings and formatted dates
+                let eventDate;
+                try {
+                    if (event.date) {
+                        // Try parsing as YYYY-MM-DD first
+                        eventDate = new Date(event.date + 'T00:00:00');
+                        // If date is invalid, try parsing as-is
+                        if (isNaN(eventDate.getTime())) {
+                            eventDate = new Date(event.date);
+                        }
+                        // If still invalid, use today
+                        if (isNaN(eventDate.getTime())) {
+                            eventDate = new Date();
+                        }
+                    } else {
+                        eventDate = new Date();
+                    }
+                } catch {
+                    eventDate = new Date();
+                }
+                
+                return {
+                    id: event.id || Date.now() + Math.random(),
+                    title: event.title || 'Untitled Event',
+                    time: event.time || eventDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    date: eventDate.toISOString().split('T')[0], // Store as YYYY-MM-DD for calendar view
+                    dateDisplay: eventDate.toLocaleDateString(), // For display in list view
+                    description: event.description || ''
+                };
+            });
+            
+            console.log('[CALENDAR] Formatted events:', formattedEvents);
             setCalendarEvents(formattedEvents);
             // Also send to backend for agent cache
             socket.emit('calendar_events_list', { events: formattedEvents });
+        };
+        
+        // Handle todos list from backend (from external API)
+        const handleTodosList = (data) => {
+            console.log('[TODOS] Received todos list from backend:', data);
+            if (data && data.todos && Array.isArray(data.todos)) {
+                // Update local state with todos from API
+                setTodos(data.todos);
+                // Also save to localStorage
+                localStorage.setItem('jarvis_todos', JSON.stringify(data.todos));
+            }
         };
         
         // Also send todos list on mount/update
@@ -144,6 +191,7 @@ const CalendarTodoPanel = ({ socket, position, onClose, onMouseDown, activeDragE
         socket.on('todo_update', handleTodoUpdate);
         socket.on('calendar_update', handleCalendarUpdate);
         socket.on('request_todos', handleRequestTodos);
+        socket.on('todos_list', handleTodosList); // Handle todos from backend API
 
         // Refresh events every 5 minutes
         const interval = setInterval(fetchCalendarEvents, 5 * 60 * 1000);
@@ -186,6 +234,159 @@ const CalendarTodoPanel = ({ socket, position, onClose, onMouseDown, activeDragE
         }
     };
 
+    // Calendar view helpers
+    const getDaysInMonth = (date) => {
+        const year = date.getFullYear();
+        const month = date.getMonth();
+        return new Date(year, month + 1, 0).getDate();
+    };
+
+    const getFirstDayOfMonth = (date) => {
+        const year = date.getFullYear();
+        const month = date.getMonth();
+        return new Date(year, month, 1).getDay();
+    };
+
+    const getEventsForDate = (date) => {
+        const dateStr = date.toISOString().split('T')[0];
+        return calendarEvents.filter(event => {
+            const eventDate = new Date(event.date);
+            return eventDate.toISOString().split('T')[0] === dateStr;
+        });
+    };
+
+    const formatDateForEvent = (dateStr) => {
+        try {
+            const date = new Date(dateStr);
+            return date.toISOString().split('T')[0];
+        } catch {
+            return new Date().toISOString().split('T')[0];
+        }
+    };
+
+    const renderCalendarView = () => {
+        const daysInMonth = getDaysInMonth(currentMonth);
+        const firstDay = getFirstDayOfMonth(currentMonth);
+        const days = [];
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                          'July', 'August', 'September', 'October', 'November', 'December'];
+        
+        // Add empty cells for days before the first day of the month
+        for (let i = 0; i < firstDay; i++) {
+            days.push(null);
+        }
+        
+        // Add cells for each day of the month
+        for (let day = 1; day <= daysInMonth; day++) {
+            const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
+            const eventsForDay = getEventsForDate(date);
+            days.push({ day, date, events: eventsForDay });
+        }
+        
+        return (
+            <div className="flex flex-col h-full">
+                {/* Month Navigation */}
+                <div className="flex items-center justify-between mb-2 px-1">
+                    <button
+                        onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1))}
+                        className="text-cyan-400 hover:text-cyan-300 text-xs px-2 py-1 rounded"
+                    >
+                        ←
+                    </button>
+                    <span className="text-xs font-semibold text-cyan-300">
+                        {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
+                    </span>
+                    <button
+                        onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1))}
+                        className="text-cyan-400 hover:text-cyan-300 text-xs px-2 py-1 rounded"
+                    >
+                        →
+                    </button>
+                </div>
+                
+                {/* Calendar Grid */}
+                <div className="flex-1 overflow-y-auto">
+                    {/* Day headers */}
+                    <div className="grid grid-cols-7 gap-1 mb-1">
+                        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                            <div key={day} className="text-[9px] text-gray-500 text-center font-mono py-1">
+                                {day}
+                            </div>
+                        ))}
+                    </div>
+                    
+                    {/* Calendar days */}
+                    <div className="grid grid-cols-7 gap-1">
+                        {days.map((dayData, idx) => {
+                            if (dayData === null) {
+                                return <div key={`empty-${idx}`} className="aspect-square"></div>;
+                            }
+                            
+                            const isToday = dayData.date.toDateString() === new Date().toDateString();
+                            const hasEvents = dayData.events.length > 0;
+                            
+                            return (
+                                <div
+                                    key={dayData.day}
+                                    className={`aspect-square border rounded p-1 text-[10px] ${
+                                        isToday 
+                                            ? 'border-cyan-500 bg-cyan-500/20' 
+                                            : hasEvents 
+                                                ? 'border-cyan-500/30 bg-gray-900/30' 
+                                                : 'border-gray-700 bg-gray-900/10'
+                                    }`}
+                                >
+                                    <div className={`font-mono ${isToday ? 'text-cyan-300 font-bold' : 'text-gray-400'}`}>
+                                        {dayData.day}
+                                    </div>
+                                    {hasEvents && (
+                                        <div className="mt-0.5 space-y-0.5">
+                                            {dayData.events.slice(0, 2).map(event => (
+                                                <div
+                                                    key={event.id}
+                                                    className="bg-cyan-500/30 rounded px-1 py-0.5 text-[8px] text-cyan-200 truncate"
+                                                    title={event.title}
+                                                >
+                                                    {event.title}
+                                                </div>
+                                            ))}
+                                            {dayData.events.length > 2 && (
+                                                <div className="text-[8px] text-cyan-400 text-center">
+                                                    +{dayData.events.length - 2}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const renderListView = () => {
+        return (
+            <div className="space-y-2 overflow-y-auto h-full">
+                {calendarEvents.length === 0 ? (
+                    <div className="text-gray-600 text-xs font-mono py-4 text-center">
+                        No events scheduled
+                    </div>
+                ) : (
+                    calendarEvents.map(event => (
+                        <div key={event.id} className="bg-gray-900/50 border border-cyan-500/20 rounded p-2 text-xs">
+                            <div className="text-cyan-300 font-semibold">{event.title}</div>
+                            <div className="text-gray-500 text-[10px] mt-1">
+                                {event.time} • {event.dateDisplay || event.date}
+                            </div>
+                        </div>
+                    ))
+                )}
+            </div>
+        );
+    };
+
     return (
         <div
             className={`absolute flex flex-col transition-all duration-200 
@@ -218,24 +419,39 @@ const CalendarTodoPanel = ({ socket, position, onClose, onMouseDown, activeDragE
 
             <div className="relative z-20 flex-1 flex flex-col overflow-hidden">
                 {/* Calendar Section */}
-                <div className="flex-1 border-b border-gray-800 overflow-y-auto p-3">
-                    <h3 className="text-xs font-bold text-cyan-400 mb-2 flex items-center gap-1">
-                        <Calendar size={12} />
-                        TODAY'S EVENTS
-                    </h3>
-                    <div className="space-y-2">
-                        {calendarEvents.length === 0 ? (
-                            <div className="text-gray-600 text-xs font-mono py-4 text-center">
-                                No events scheduled
-                            </div>
-                        ) : (
-                            calendarEvents.map(event => (
-                                <div key={event.id} className="bg-gray-900/50 border border-cyan-500/20 rounded p-2 text-xs">
-                                    <div className="text-cyan-300 font-semibold">{event.title}</div>
-                                    <div className="text-gray-500 text-[10px] mt-1">{event.time} • {event.date}</div>
-                                </div>
-                            ))
-                        )}
+                <div className="flex-1 border-b border-gray-800 overflow-hidden p-3 flex flex-col">
+                    <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-xs font-bold text-cyan-400 flex items-center gap-1">
+                            <Calendar size={12} />
+                            {viewMode === 'list' ? "TODAY'S EVENTS" : "CALENDAR"}
+                        </h3>
+                        <div className="flex gap-1">
+                            <button
+                                onClick={() => setViewMode('list')}
+                                className={`p-1 rounded transition-colors ${
+                                    viewMode === 'list' 
+                                        ? 'bg-cyan-500/30 text-cyan-300' 
+                                        : 'text-gray-500 hover:text-gray-400'
+                                }`}
+                                title="List View"
+                            >
+                                <List size={12} />
+                            </button>
+                            <button
+                                onClick={() => setViewMode('calendar')}
+                                className={`p-1 rounded transition-colors ${
+                                    viewMode === 'calendar' 
+                                        ? 'bg-cyan-500/30 text-cyan-300' 
+                                        : 'text-gray-500 hover:text-gray-400'
+                                }`}
+                                title="Calendar View"
+                            >
+                                <Grid size={12} />
+                            </button>
+                        </div>
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                        {viewMode === 'calendar' ? renderCalendarView() : renderListView()}
                     </div>
                 </div>
 

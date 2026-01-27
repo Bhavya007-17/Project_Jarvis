@@ -506,6 +506,7 @@ class AudioLoop:
         self._agent_speaking = False
         self._agent_speech_start_time = None
         self._agent_speech_end_time = None
+        self._last_audio_chunk_time = None  # Track when last audio chunk was played
         
         # Echo cancellation: Keep track of recent output audio for cancellation
         self._output_audio_buffer = []
@@ -522,30 +523,32 @@ class AudioLoop:
             # Convert numpy array to bytes (indata is float32, convert to int16)
             audio_clipped = np.clip(indata, -1.0, 1.0)
             audio_int16 = (audio_clipped * 32767).astype(np.int16)
-            audio_bytes = audio_int16.tobytes()
             
-            # Enhanced echo cancellation: if we're playing audio, suppress input significantly
-            if hasattr(self, '_is_playing_audio') and self._is_playing_audio:
-                # Mark agent as speaking
-                if not hasattr(self, '_agent_speaking') or not self._agent_speaking:
-                    self._agent_speaking = True
-                    self._agent_speech_start_time = time.time()
-                # Reduce input volume by 95% when output is active (aggressive ducking to prevent feedback)
-                audio_int16 = (audio_int16 * 0.05).astype(np.int16)
+            # Check if agent is currently speaking or recently stopped (within last 2 seconds)
+            current_time = time.time()
+            agent_recently_spoke = False
+            
+            if hasattr(self, '_agent_speaking') and self._agent_speaking:
+                agent_recently_spoke = True
+            elif hasattr(self, '_agent_speech_end_time') and self._agent_speech_end_time:
+                time_since_stopped = current_time - self._agent_speech_end_time
+                if time_since_stopped < 2.0:  # 2 second cooldown after agent stops
+                    agent_recently_spoke = True
+            
+            # If agent is speaking or recently stopped, completely mute the input
+            if agent_recently_spoke:
+                # Completely mute input (set to zero) to prevent feedback
+                audio_int16 = np.zeros_like(audio_int16)
                 audio_bytes = audio_int16.tobytes()
-                # Set RMS to very low to prevent VAD triggering
-                rms = 0
+                rms = 0  # Set RMS to zero to prevent VAD triggering
             else:
-                # Agent stopped speaking - track end time
-                if hasattr(self, '_agent_speaking') and self._agent_speaking:
-                    self._agent_speech_end_time = time.time()
-            
-            # Calculate RMS for VAD
-            if len(audio_int16) > 0:
-                sum_squares = np.sum(audio_int16.astype(np.int32) ** 2)
-                rms = int(math.sqrt(sum_squares / len(audio_int16)))
-            else:
-                rms = 0
+                # Normal processing - calculate RMS for VAD
+                audio_bytes = audio_int16.tobytes()
+                if len(audio_int16) > 0:
+                    sum_squares = np.sum(audio_int16.astype(np.int32) ** 2)
+                    rms = int(math.sqrt(sum_squares / len(audio_int16)))
+                else:
+                    rms = 0
             
             # Put in queue for async processing (non-blocking)
             try:
@@ -605,18 +608,22 @@ class AudioLoop:
                 
                 # 2. VAD Logic for Video
                 # Skip VAD if agent is speaking or recently stopped speaking (prevent self-interruption)
+                current_time = time.time()
+                agent_recently_spoke = False
+                
                 if hasattr(self, '_agent_speaking') and self._agent_speaking:
-                    # Check if enough time has passed since agent stopped speaking
-                    if hasattr(self, '_agent_speech_end_time') and self._agent_speech_end_time:
-                        time_since_agent_stopped = time.time() - self._agent_speech_end_time
-                        if time_since_agent_stopped < 1.0:  # Wait 1 second after agent stops before accepting input
-                            continue  # Skip processing this audio chunk
-                        else:
-                            # Reset agent speaking state after silence period
-                            self._agent_speaking = False
-                            self._agent_speech_end_time = None
+                    agent_recently_spoke = True
+                elif hasattr(self, '_agent_speech_end_time') and self._agent_speech_end_time:
+                    time_since_agent_stopped = current_time - self._agent_speech_end_time
+                    if time_since_agent_stopped < 2.0:  # Wait 2 seconds after agent stops before accepting input
+                        agent_recently_spoke = True
                     else:
-                        continue  # Agent is still speaking, skip
+                        # Reset agent speaking state after cooldown period
+                        self._agent_speaking = False
+                        self._agent_speech_end_time = None
+                
+                if agent_recently_spoke:
+                    continue  # Skip processing this audio chunk - agent is speaking or recently stopped
                 
                 if rms > VAD_THRESHOLD:
                     # Speech Detected
@@ -840,7 +847,14 @@ class AudioLoop:
                 async for response in turn:
                     # 1. Handle Audio Data
                     if data := response.data:
-                        self.audio_in_queue.put_nowait(data)
+                        try:
+                            self.audio_in_queue.put_nowait(data)
+                            # Debug: log when audio is received
+                            if not hasattr(self, '_last_audio_log_time') or time.time() - self._last_audio_log_time > 2.0:
+                                print(f"[JARVIS DEBUG] [AUDIO] Received audio chunk ({len(data)} bytes)")
+                                self._last_audio_log_time = time.time()
+                        except Exception as e:
+                            print(f"[JARVIS DEBUG] [AUDIO] Error queuing audio: {e}")
                         # NOTE: 'continue' removed here to allow processing transcription/tools in same packet
 
                     # 2. Handle Transcription (User & Model)
@@ -1477,8 +1491,6 @@ class AudioLoop:
             traceback.print_exc()
             return
         
-        self._is_playing_audio = False
-        
         while True:
             bytestream = await self.audio_in_queue.get()
             if self.on_audio_data:
@@ -1486,47 +1498,58 @@ class AudioLoop:
             
             # Prevent feedback loop: pause audio output when user is speaking
             # Check if user speech was recently detected (within last 0.5 seconds)
+            # BUT: Don't block audio if user stopped speaking more than 0.3 seconds ago
+            user_speaking_now = False
             if hasattr(self, '_user_speaking') and self._user_speaking:
-                # Check if enough time has passed since user stopped speaking
                 if hasattr(self, '_user_speech_end_time') and self._user_speech_end_time:
-                    if time.time() - self._user_speech_end_time > 0.5:
+                    time_since_user_stopped = time.time() - self._user_speech_end_time
+                    if time_since_user_stopped < 0.3:  # Only block if user stopped less than 0.3s ago
+                        user_speaking_now = True
+                    else:
+                        # User stopped speaking, clear the flag
                         self._user_speaking = False
                         self._user_speech_end_time = None
-                    else:
-                        # Skip this audio chunk to prevent feedback
-                        continue
                 else:
-                    # Skip this audio chunk to prevent feedback
-                    continue
+                    # User is speaking but no end time set - allow audio after short delay
+                    user_speaking_now = True
+            
+            if user_speaking_now:
+                # Skip this audio chunk to prevent feedback
+                continue
             
             # Mark agent as speaking when we start playing audio
             if not hasattr(self, '_agent_speaking') or not self._agent_speaking:
                 self._agent_speaking = True
                 self._agent_speech_start_time = time.time()
+                print(f"[JARVIS DEBUG] [AUDIO] Agent started speaking - muting mic input")
             
             # Convert bytes to numpy array and play
             try:
                 audio_array = np.frombuffer(bytestream, dtype=np.int16)
-                self._is_playing_audio = True
                 await asyncio.to_thread(self.output_stream.write, audio_array)
-                self._is_playing_audio = False
                 
-                # Update agent speaking end time - this will be checked in listen_audio
-                self._agent_speech_end_time = time.time()
+                # Update timestamps for tracking
+                current_time = time.time()
+                self._agent_speech_end_time = current_time
+                self._last_audio_chunk_time = current_time
                 
                 # Schedule reset of agent speaking state after a delay
                 async def reset_agent_speaking():
-                    await asyncio.sleep(1.0)  # Wait 1 second after last audio chunk
-                    # Only reset if no new audio has come in
-                    if hasattr(self, '_agent_speech_end_time') and self._agent_speech_end_time:
-                        if time.time() - self._agent_speech_end_time >= 1.0:
+                    await asyncio.sleep(2.5)  # Wait 2.5 seconds after last audio chunk
+                    # Only reset if no new audio has come in (check if last chunk time hasn't changed)
+                    if hasattr(self, '_last_audio_chunk_time') and self._last_audio_chunk_time:
+                        if time.time() - self._last_audio_chunk_time >= 2.5:
                             self._agent_speaking = False
                             self._agent_speech_end_time = None
-                            print(f"[JARVIS DEBUG] [AUDIO] Agent speaking state reset after silence period")
+                            self._last_audio_chunk_time = None
+                            print(f"[JARVIS DEBUG] [AUDIO] Agent speaking state reset - mic input re-enabled")
                 
                 # Cancel previous reset task if exists
                 if hasattr(self, '_reset_agent_task') and self._reset_agent_task:
-                    self._reset_agent_task.cancel()
+                    try:
+                        self._reset_agent_task.cancel()
+                    except:
+                        pass
                 
                 # Create new reset task
                 self._reset_agent_task = asyncio.create_task(reset_agent_speaking())
