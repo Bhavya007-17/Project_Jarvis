@@ -25,6 +25,9 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import jarvis
 from authenticator import FaceAuthenticator
 from kasa_agent import KasaAgent
+from weather import get_weather as fetch_weather
+from briefing import get_briefing as fetch_briefing
+from system_monitor import get_system_stats
 
 # Create a Socket.IO server
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
@@ -73,11 +76,15 @@ DEFAULT_SETTINGS = {
         "complete_todo": False,
         "delete_todo": False,
         "get_calendar_events": False,
-        "add_calendar_event": False
+        "add_calendar_event": False,
+        "get_weather": False,
+        "get_daily_briefing": False
     },
     "printers": [], # List of {host, port, name, type}
     "kasa_devices": [], # List of {ip, alias, model}
-    "camera_flipped": False # Invert cursor horizontal direction
+    "camera_flipped": False, # Invert cursor horizontal direction
+    "weather_lat": 40.7128, # Default NYC for Dashboard weather
+    "weather_lon": -74.0060
 }
 
 SETTINGS = DEFAULT_SETTINGS.copy()
@@ -1015,6 +1022,11 @@ async def update_settings(sid, data):
         SETTINGS["camera_flipped"] = data["camera_flipped"]
         print(f"[SERVER] Camera flip set to: {data['camera_flipped']}")
 
+    if "weather_lat" in data:
+        SETTINGS["weather_lat"] = float(data["weather_lat"])
+    if "weather_lon" in data:
+        SETTINGS["weather_lon"] = float(data["weather_lon"])
+
     save_settings()
     # Broadcast new full settings
     await sio.emit('settings', SETTINGS)
@@ -1157,6 +1169,46 @@ async def calendar_events_list(sid, data):
     # Update the audio loop's calendar cache
     if audio_loop:
         audio_loop._calendar_events_cache = data.get('events', [])
+
+
+# --- Dashboard tab: weather, briefing, system stats ---
+@sio.event
+async def get_weather(sid, data=None):
+    """Return current weather and hourly forecast for Dashboard tab."""
+    try:
+        lat = SETTINGS.get("weather_lat", 40.7128)
+        lon = SETTINGS.get("weather_lon", -74.0060)
+        if data and "lat" in data:
+            lat = float(data["lat"])
+        if data and "lon" in data:
+            lon = float(data["lon"])
+        loop = asyncio.get_event_loop()
+        payload = await loop.run_in_executor(None, lambda: fetch_weather(lat, lon))
+        await sio.emit("weather", payload, room=sid)
+    except Exception as e:
+        await sio.emit("weather", {"ok": False, "error": str(e)}, room=sid)
+
+
+@sio.event
+async def get_briefing(sid):
+    """Return daily briefing headlines (Technology, Science, Top) for Dashboard tab."""
+    try:
+        loop = asyncio.get_event_loop()
+        payload = await loop.run_in_executor(None, fetch_briefing)
+        await sio.emit("briefing", payload, room=sid)
+    except Exception as e:
+        await sio.emit("briefing", {"ok": False, "error": str(e)}, room=sid)
+
+
+@sio.event
+async def get_system_stats(sid):
+    """Return CPU and memory usage for Dashboard tab."""
+    try:
+        payload = get_system_stats()
+        await sio.emit("system_stats", payload, room=sid)
+    except Exception as e:
+        await sio.emit("system_stats", {"ok": False, "error": str(e)}, room=sid)
+
 
 if __name__ == "__main__":
     uvicorn.run(

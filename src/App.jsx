@@ -16,6 +16,7 @@ import KasaWindow from './components/KasaWindow';
 import PrinterWindow from './components/PrinterWindow';
 import SettingsWindow from './components/SettingsWindow';
 import CalendarTodoPanel from './components/CalendarTodoPanel';
+import DashboardTab from './components/DashboardTab';
 
 
 
@@ -62,6 +63,12 @@ function App() {
     const [showCadWindow, setShowCadWindow] = useState(false);
     const [showBrowserWindow, setShowBrowserWindow] = useState(false);
     const [showCalendarTodo, setShowCalendarTodo] = useState(false);
+
+    // Tab: Home | Dashboard (ada_local-style features)
+    const [activeTab, setActiveTab] = useState('home');
+    const [weather, setWeather] = useState(null);
+    const [briefing, setBriefing] = useState(null);
+    const [systemStats, setSystemStats] = useState(null);
 
     // Printing workflow status (for top toolbar display)
     const [slicingStatus, setSlicingStatus] = useState({ active: false, percent: 0, message: '' });
@@ -511,6 +518,10 @@ function App() {
             addMessage('System', `Switched to project: ${data.project}`);
         });
 
+        socket.on('weather', (data) => setWeather(data));
+        socket.on('briefing', (data) => setBriefing(data));
+        socket.on('system_stats', (data) => setSystemStats(data));
+
         // Track printer count for toolbar display
         socket.on('printer_list', (list) => {
             console.log('[PRINTERS] Count:', list.length);
@@ -637,11 +648,24 @@ function App() {
             socket.off('slicing_progress');
             socket.off('print_status_update');
             socket.off('error');
+            socket.off('weather');
+            socket.off('briefing');
+            socket.off('system_stats');
 
             stopMicVisualizer();
             stopVideo();
         };
     }, []);
+
+    // Dashboard tab: fetch weather, briefing on switch; poll system stats when Dashboard is active
+    useEffect(() => {
+        if (activeTab !== 'dashboard') return;
+        socket.emit('get_weather');
+        socket.emit('get_briefing');
+        socket.emit('get_system_stats');
+        const interval = setInterval(() => socket.emit('get_system_stats'), 2500);
+        return () => clearInterval(interval);
+    }, [activeTab]);
 
     // Initial check in case we are already connected (fix race condition)
     useEffect(() => {
@@ -1451,8 +1475,28 @@ function App() {
                 </div>
             </div>
 
+            {/* Tab Bar: Home | Dashboard */}
+            <div className="flex items-center gap-1 px-4 py-1.5 border-b border-cyan-500/20 bg-black/30 z-40" style={{ WebkitAppRegion: 'no-drag' }}>
+                <button
+                    onClick={() => setActiveTab('home')}
+                    className={`px-4 py-2 rounded-lg text-sm font-mono transition-colors ${activeTab === 'home' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-cyan-600/80 hover:text-cyan-400 hover:bg-cyan-500/10 border border-transparent'}`}
+                >
+                    Home
+                </button>
+                <button
+                    onClick={() => setActiveTab('dashboard')}
+                    className={`px-4 py-2 rounded-lg text-sm font-mono transition-colors ${activeTab === 'dashboard' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-cyan-600/80 hover:text-cyan-400 hover:bg-cyan-500/10 border border-transparent'}`}
+                >
+                    Dashboard
+                </button>
+            </div>
+
             {/* Main Content */}
-            <div className="flex-1 relative z-10 flex flex-col items-center justify-center">
+            <div className="flex-1 relative z-10 flex flex-col items-center justify-center overflow-hidden">
+                {activeTab === 'dashboard' ? (
+                    <DashboardTab weather={weather} briefing={briefing} systemStats={systemStats} />
+                ) : (
+                <>
                 {/* Central Visualizer (AI Audio) */}
                 <div
                     id="visualizer"
@@ -1703,6 +1747,8 @@ function App() {
                     onConfirm={handleConfirmTool}
                     onDeny={handleDenyTool}
                 />
+                </>
+                )}
             </div>
         </div>
     );

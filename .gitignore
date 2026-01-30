@@ -32,10 +32,14 @@ dist-electron/
 release/
 out/
 
-# IDE
+# IDE / Debug
 .vscode/
 .idea/
+.cursor/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Reference repo (ada_local) - clone manually if needed
+ada_local_ref/

@@ -22,8 +22,9 @@ aiohttp>=3.9.0
 python-dotenv
 # Face & Hand tracking
 mediapipe
-# CAD Generation
-build123d
+# CAD Generation (optional: requires Python 3.10–3.12; cadquery-ocp has no wheel for 3.14)
+# Uncomment and use a compatible Python env if you need CAD features:
+# build123d
 # Wake Word Listener
 SpeechRecognition
 # Google Calendar API (optional)
@@ -32,3 +33,5 @@ google-auth-httplib2>=0.1.0
 google-auth-oauthlib>=1.0.0
 # External API support (optional)
 requests>=2.31.0
+# System monitor (Dashboard tab)
+psutil>=5.9.0

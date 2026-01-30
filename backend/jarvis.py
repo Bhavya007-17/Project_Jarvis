@@ -5,6 +5,7 @@ import os
 import sys
 import traceback
 import queue
+import json
 from dotenv import load_dotenv
 import cv2
 import sounddevice as sd
@@ -25,6 +26,36 @@ if sys.version_info < (3, 11, 0):
     asyncio.ExceptionGroup = exceptiongroup.ExceptionGroup
 
 from tools import tools_list
+from weather import get_weather as fetch_weather
+from briefing import get_briefing as fetch_briefing
+
+# Debug logging configuration for agent instrumentation
+DEBUG_LOG_PATH = r"c:\Users\bhavy\ada_v2\.cursor\debug.log"
+
+
+def jarvis_debug_log(hypothesis_id, location, message, data):
+    """Append a single NDJSON debug entry for runtime diagnostics."""
+    try:
+        # Ensure directory exists
+        log_dir = os.path.dirname(DEBUG_LOG_PATH)
+        if log_dir and not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
+        
+        entry = {
+            "sessionId": "debug-session",
+            "runId": "run1",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data or {},
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        # Never let logging break the main flow, but print for debugging
+        print(f"[DEBUG LOG ERROR] {e}")
+        pass
 
 # Audio format constants (sounddevice uses numpy dtypes)
 FORMAT = np.int16  # 16-bit PCM
@@ -282,7 +313,28 @@ add_calendar_event_tool = {
     }
 }
 
-tools = [{'google_search': {}}, {"function_declarations": [generate_cad, run_web_agent, create_project_tool, switch_project_tool, list_projects_tool, list_smart_devices_tool, control_light_tool, discover_printers_tool, print_stl_tool, get_print_status_tool, iterate_cad_tool, shutdown_system_tool, add_todo_tool, get_todos_tool, complete_todo_tool, delete_todo_tool, get_calendar_events_tool, add_calendar_event_tool] + tools_list[0]['function_declarations'][1:]}]
+get_weather_tool = {
+    "name": "get_weather",
+    "description": "Gets current weather and a short forecast. Use when the user asks about the weather, temperature, or conditions.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "lat": {"type": "NUMBER", "description": "Optional latitude. If omitted, uses default location."},
+            "lon": {"type": "NUMBER", "description": "Optional longitude. If omitted, uses default location."}
+        }
+    }
+}
+
+get_daily_briefing_tool = {
+    "name": "get_daily_briefing",
+    "description": "Gets today's daily briefing: headlines from Technology, Science, and Top Stories. Use when the user asks for news, briefing, or what's happening today.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {}
+    }
+}
+
+tools = [{'google_search': {}}, {"function_declarations": [generate_cad, run_web_agent, create_project_tool, switch_project_tool, list_projects_tool, list_smart_devices_tool, control_light_tool, discover_printers_tool, print_stl_tool, get_print_status_tool, iterate_cad_tool, shutdown_system_tool, add_todo_tool, get_todos_tool, complete_todo_tool, delete_todo_tool, get_calendar_events_tool, add_calendar_event_tool, get_weather_tool, get_daily_briefing_tool] + tools_list[0]['function_declarations'][1:]}]
 
 # --- CONFIG UPDATE: Enabled Transcription ---
 config = types.LiveConnectConfig(
@@ -524,7 +576,8 @@ class AudioLoop:
             audio_clipped = np.clip(indata, -1.0, 1.0)
             audio_int16 = (audio_clipped * 32767).astype(np.int16)
             
-            # Check if agent is currently speaking or recently stopped (within last 2 seconds)
+            # Check if agent is currently speaking or recently stopped (brief cooldown to avoid self-interruption)
+            AGENT_COOLDOWN_S = 0.6  # Short window so conversation feels natural
             current_time = time.time()
             agent_recently_spoke = False
             
@@ -532,7 +585,7 @@ class AudioLoop:
                 agent_recently_spoke = True
             elif hasattr(self, '_agent_speech_end_time') and self._agent_speech_end_time:
                 time_since_stopped = current_time - self._agent_speech_end_time
-                if time_since_stopped < 2.0:  # 2 second cooldown after agent stops
+                if time_since_stopped < AGENT_COOLDOWN_S:
                     agent_recently_spoke = True
             
             # If agent is speaking or recently stopped, completely mute the input
@@ -549,6 +602,22 @@ class AudioLoop:
                     rms = int(math.sqrt(sum_squares / len(audio_int16)))
                 else:
                     rms = 0
+
+            # #region agent log
+            try:
+                jarvis_debug_log(
+                    hypothesis_id="H4",
+                    location="jarvis.listen_audio.audio_callback",
+                    message="Mic callback processed frame",
+                    data={
+                        "frames": int(frames),
+                        "rms": int(rms),
+                        "agent_recently_spoke": bool(agent_recently_spoke),
+                    },
+                )
+            except Exception:
+                pass
+            # #endregion
             
             # Put in queue for async processing (non-blocking)
             try:
@@ -611,11 +680,12 @@ class AudioLoop:
                 current_time = time.time()
                 agent_recently_spoke = False
                 
+                AGENT_COOLDOWN_S = 0.6  # Short window so user can respond quickly (one-on-one feel)
                 if hasattr(self, '_agent_speaking') and self._agent_speaking:
                     agent_recently_spoke = True
                 elif hasattr(self, '_agent_speech_end_time') and self._agent_speech_end_time:
                     time_since_agent_stopped = current_time - self._agent_speech_end_time
-                    if time_since_agent_stopped < 2.0:  # Wait 2 seconds after agent stops before accepting input
+                    if time_since_agent_stopped < AGENT_COOLDOWN_S:
                         agent_recently_spoke = True
                     else:
                         # Reset agent speaking state after cooldown period
@@ -845,17 +915,74 @@ class AudioLoop:
             while True:
                 turn = self.session.receive()
                 async for response in turn:
+                    # #region agent log
+                    try:
+                        jarvis_debug_log(
+                            hypothesis_id="H1",
+                            location="jarvis.receive_audio",
+                            message="Processing response from Gemini",
+                            data={
+                                "has_data": bool(response.data),
+                                "data_length": len(response.data) if response.data else 0,
+                                "has_server_content": bool(response.server_content),
+                                "has_tool_call": bool(response.tool_call),
+                            },
+                        )
+                    except Exception:
+                        pass
+                    # #endregion
+                    
                     # 1. Handle Audio Data
                     if data := response.data:
                         try:
+                            queue_size_before = self.audio_in_queue.qsize()
                             self.audio_in_queue.put_nowait(data)
                             # Debug: log when audio is received
                             if not hasattr(self, '_last_audio_log_time') or time.time() - self._last_audio_log_time > 2.0:
                                 print(f"[JARVIS DEBUG] [AUDIO] Received audio chunk ({len(data)} bytes)")
                                 self._last_audio_log_time = time.time()
+                            
+                            # #region agent log
+                            try:
+                                jarvis_debug_log(
+                                    hypothesis_id="H1",
+                                    location="jarvis.receive_audio",
+                                    message="Audio chunk queued successfully",
+                                    data={
+                                        "length": len(data),
+                                        "queue_size_before": queue_size_before,
+                                        "queue_size_after": self.audio_in_queue.qsize(),
+                                    },
+                                )
+                            except Exception:
+                                pass
+                            # #endregion
                         except Exception as e:
                             print(f"[JARVIS DEBUG] [AUDIO] Error queuing audio: {e}")
+                            # #region agent log
+                            try:
+                                jarvis_debug_log(
+                                    hypothesis_id="H2",
+                                    location="jarvis.receive_audio",
+                                    message="Failed to queue audio chunk",
+                                    data={"error": str(e), "queue_size": self.audio_in_queue.qsize()},
+                                )
+                            except Exception:
+                                pass
+                            # #endregion
                         # NOTE: 'continue' removed here to allow processing transcription/tools in same packet
+                    else:
+                        # #region agent log
+                        try:
+                            jarvis_debug_log(
+                                hypothesis_id="H1",
+                                location="jarvis.receive_audio",
+                                message="Response has no audio data",
+                                data={"has_server_content": bool(response.server_content)},
+                            )
+                        except Exception:
+                            pass
+                        # #endregion
 
                     # 2. Handle Transcription (User & Model)
                     if response.server_content:
@@ -936,7 +1063,7 @@ class AudioLoop:
                         print("The tool was called")
                         function_responses = []
                         for fc in response.tool_call.function_calls:
-                            if fc.name in ["generate_cad", "run_web_agent", "write_file", "read_directory", "read_file", "create_project", "switch_project", "list_projects", "list_smart_devices", "control_light", "discover_printers", "print_stl", "get_print_status", "iterate_cad", "shutdown_system", "add_todo", "get_todos", "complete_todo", "delete_todo", "get_calendar_events", "add_calendar_event"]:
+                            if fc.name in ["generate_cad", "run_web_agent", "write_file", "read_directory", "read_file", "create_project", "switch_project", "list_projects", "list_smart_devices", "control_light", "discover_printers", "print_stl", "get_print_status", "iterate_cad", "shutdown_system", "add_todo", "get_todos", "complete_todo", "delete_todo", "get_calendar_events", "add_calendar_event", "get_weather", "get_daily_briefing"]:
                                 prompt = fc.args.get("prompt", "") # Prompt is not present for all tools
                                 
                                 # Check Permissions (Default to True if not set)
@@ -1457,6 +1584,41 @@ class AudioLoop:
                                         id=fc.id, name=fc.name, response={"result": f"Added event '{title}' to your calendar for {time_str}."}
                                     )
                                     function_responses.append(function_response)
+
+                                elif fc.name == "get_weather":
+                                    lat = fc.args.get("lat", 40.7128)
+                                    lon = fc.args.get("lon", -74.0060)
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'get_weather' lat={lat} lon={lon}")
+                                    loop = asyncio.get_event_loop()
+                                    w = await loop.run_in_executor(None, lambda: fetch_weather(lat, lon))
+                                    if w.get("ok"):
+                                        cur = w.get("current", {})
+                                        result_str = f"Current: {cur.get('temperature_2m')}°C, {cur.get('weather_label', '')}, humidity {cur.get('relative_humidity_2m')}%, wind {cur.get('wind_speed_10m')} km/h. Timezone: {w.get('timezone', '')}."
+                                    else:
+                                        result_str = f"Weather unavailable: {w.get('error', 'Unknown error')}."
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": result_str}
+                                    )
+                                    function_responses.append(function_response)
+
+                                elif fc.name == "get_daily_briefing":
+                                    print(f"[JARVIS DEBUG] [TOOL] Tool Call: 'get_daily_briefing'")
+                                    loop = asyncio.get_event_loop()
+                                    b = await loop.run_in_executor(None, fetch_briefing)
+                                    if b.get("ok"):
+                                        headlines = b.get("headlines", {})
+                                        parts = []
+                                        for cat in ["technology", "science", "top"]:
+                                            items = headlines.get(cat, [])
+                                            if items:
+                                                parts.append(f"{cat.title()}: " + "; ".join(item.get("title", "")[:80] for item in items[:3]))
+                                        result_str = "Daily Briefing:\n" + "\n".join(parts) if parts else "No headlines available."
+                                    else:
+                                        result_str = f"Briefing unavailable: {b.get('error', 'Unknown error')}."
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": result_str}
+                                    )
+                                    function_responses.append(function_response)
                                     
                         if function_responses:
                             await self.session.send_tool_response(function_responses=function_responses)
@@ -1464,8 +1626,10 @@ class AudioLoop:
                 # Turn/Response Loop Finished
                 self.flush_chat()
 
-                while not self.audio_in_queue.empty():
-                    self.audio_in_queue.get_nowait()
+                # REMOVED: Clearing audio queue after each turn was preventing audio playback
+                # Audio chunks should be played by play_audio() task, not discarded here
+                # while not self.audio_in_queue.empty():
+                #     self.audio_in_queue.get_nowait()
         except Exception as e:
             print(f"Error in receive_audio: {e}")
             traceback.print_exc()
@@ -1485,14 +1649,62 @@ class AudioLoop:
             )
             self.output_stream.start()
             print(f"[JARVIS] Audio output stream started on device {output_device}")
+            # #region agent log
+            try:
+                jarvis_debug_log(
+                    hypothesis_id="H3",
+                    location="jarvis.play_audio",
+                    message="Audio output stream started",
+                    data={"output_device": int(output_device) if isinstance(output_device, (int, float)) else output_device},
+                )
+            except Exception:
+                pass
+            # #endregion
         except Exception as e:
             print(f"[JARVIS] [ERR] Failed to open audio output stream: {e}")
             import traceback
             traceback.print_exc()
+            # #region agent log
+            try:
+                jarvis_debug_log(
+                    hypothesis_id="H3",
+                    location="jarvis.play_audio",
+                    message="Failed to open audio output stream",
+                    data={"error": str(e)},
+                )
+            except Exception:
+                pass
+            # #endregion
             return
         
         while True:
+            # #region agent log
+            try:
+                queue_size = self.audio_in_queue.qsize()
+                jarvis_debug_log(
+                    hypothesis_id="H2",
+                    location="jarvis.play_audio",
+                    message="Waiting for audio chunk from queue",
+                    data={"queue_size": queue_size},
+                )
+            except Exception:
+                pass
+            # #endregion
+            
             bytestream = await self.audio_in_queue.get()
+            
+            # #region agent log
+            try:
+                jarvis_debug_log(
+                    hypothesis_id="H2",
+                    location="jarvis.play_audio",
+                    message="Got audio chunk from queue",
+                    data={"chunk_length": len(bytestream), "queue_size_remaining": self.audio_in_queue.qsize()},
+                )
+            except Exception:
+                pass
+            # #endregion
+            
             if self.on_audio_data:
                 self.on_audio_data(bytestream)
             
@@ -1512,6 +1724,21 @@ class AudioLoop:
                 else:
                     # User is speaking but no end time set - allow audio after short delay
                     user_speaking_now = True
+
+            # #region agent log
+            try:
+                jarvis_debug_log(
+                    hypothesis_id="H4",
+                    location="jarvis.play_audio",
+                    message="Audio playback decision",
+                    data={
+                        "chunk_length": len(bytestream),
+                        "user_speaking_now": bool(user_speaking_now),
+                    },
+                )
+            except Exception:
+                pass
+            # #endregion
             
             if user_speaking_now:
                 # Skip this audio chunk to prevent feedback
@@ -1534,11 +1761,12 @@ class AudioLoop:
                 self._last_audio_chunk_time = current_time
                 
                 # Schedule reset of agent speaking state after a delay
+                AGENT_COOLDOWN_S = 0.6  # Short so conversation feels responsive
                 async def reset_agent_speaking():
-                    await asyncio.sleep(2.5)  # Wait 2.5 seconds after last audio chunk
+                    await asyncio.sleep(AGENT_COOLDOWN_S)
                     # Only reset if no new audio has come in (check if last chunk time hasn't changed)
                     if hasattr(self, '_last_audio_chunk_time') and self._last_audio_chunk_time:
-                        if time.time() - self._last_audio_chunk_time >= 2.5:
+                        if time.time() - self._last_audio_chunk_time >= AGENT_COOLDOWN_S:
                             self._agent_speaking = False
                             self._agent_speech_end_time = None
                             self._last_audio_chunk_time = None
