@@ -11,6 +11,7 @@ env/
 backend/reference.jpg
 backend/settings.json
 backend/last_cad_generation.json
+backend/credentials/*.json
 long_term_memory/
 projects/
 output.stl

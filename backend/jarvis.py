@@ -181,7 +181,87 @@ iterate_cad_tool = {
     "behavior": "NON_BLOCKING"
 }
 
-tools = [{'google_search': {}}, {"function_declarations": [generate_cad, run_web_agent, create_project_tool, switch_project_tool, list_projects_tool, list_smart_devices_tool, control_light_tool, discover_printers_tool, print_stl_tool, get_print_status_tool, iterate_cad_tool] + tools_list[0]['function_declarations'][1:]}]
+# Digital Suite tools (Briefing, Productivity, Research, System Ops)
+get_briefing_tool = {
+    "name": "get_briefing",
+    "description": "Gets the morning briefing: weather, system status (CPU/RAM/battery), optional news and stocks. Use when the user asks for 'the briefing', 'good morning', 'status report', or 'how is the system'.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "include_news": {"type": "BOOLEAN", "description": "Include RSS news headlines. Default false."},
+            "include_stocks": {"type": "BOOLEAN", "description": "Include stock tickers (e.g. NVDA). Default false."}
+        },
+    }
+}
+
+get_today_schedule_tool = {
+    "name": "get_today_schedule",
+    "description": "Gets the user's calendar events for today from Google Calendar. Use when the user asks about schedule, meetings, or what's on today.",
+    "parameters": {"type": "OBJECT", "properties": {}},
+}
+
+reschedule_event_tool = {
+    "name": "reschedule_event",
+    "description": "Moves a calendar event to a new time. Use when the user asks to move or reschedule an event.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "event_id": {"type": "STRING", "description": "The calendar event ID."},
+            "new_start_iso": {"type": "STRING", "description": "New start time in ISO format, e.g. 2025-02-09T14:00:00"},
+            "new_end_iso": {"type": "STRING", "description": "Optional new end time in ISO format."}
+        },
+        "required": ["event_id", "new_start_iso"]
+    },
+}
+
+get_system_status_tool = {
+    "name": "get_system_status",
+    "description": "Gets system diagnostics: CPU usage, RAM, battery, and GPU temperature if available. Use when the user asks about system health, CPU, or 'is the GPU hot'.",
+    "parameters": {"type": "OBJECT", "properties": {}},
+}
+
+kill_process_tool = {
+    "name": "kill_process",
+    "description": "Terminates a process by name or PID. Use when the user asks to kill or close a process (e.g. 'kill Chrome', 'kill that process').",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "name_substring": {"type": "STRING", "description": "Process name or substring (e.g. 'chrome', 'blender')."},
+            "pid": {"type": "INTEGER", "description": "Alternatively, process ID (PID)."}
+        },
+    }
+}
+
+web_search_tool = {
+    "name": "web_search",
+    "description": "Searches the web for factual information using DuckDuckGo. Use for lookups like material properties, definitions, or current facts.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "query": {"type": "STRING", "description": "Search query."}
+        },
+        "required": ["query"]
+    },
+}
+
+wikipedia_lookup_tool = {
+    "name": "wikipedia_lookup",
+    "description": "Gets a short Wikipedia summary for a topic. Use for factual lookups (e.g. density of a material, definitions).",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "query": {"type": "STRING", "description": "Topic to look up."}
+        },
+        "required": ["query"]
+    },
+}
+
+tools = [{'google_search': {}}, {"function_declarations": [
+    generate_cad, run_web_agent, create_project_tool, switch_project_tool, list_projects_tool,
+    list_smart_devices_tool, control_light_tool, discover_printers_tool, print_stl_tool, get_print_status_tool, iterate_cad_tool,
+    get_briefing_tool, get_today_schedule_tool, reschedule_event_tool, get_system_status_tool, kill_process_tool,
+    web_search_tool, wikipedia_lookup_tool,
+] + tools_list[0]['function_declarations'][1:]}]
 
 # --- CONFIG UPDATE: Enabled Transcription ---
 config = types.LiveConnectConfig(
@@ -193,7 +273,8 @@ config = types.LiveConnectConfig(
         "You speak with a deep, calm British male accent—refined and articulate, like a classic British butler or advisor. "
         "Your creator is Bhavya, and you address him as 'Sir'. "
         "When answering, respond using complete and concise sentences to keep a quick pacing and keep the conversation flowing. "
-        "You have a witty and fun personality.",
+        "You have a witty and fun personality. "
+        "You are engineer-first: prefer metric units (mm, g/cm³), precise language, and CAD-aware answers. When discussing parts, materials, or 3D design, be technically accurate.",
     tools=tools,
     speech_config=types.SpeechConfig(
         voice_config=types.VoiceConfig(
@@ -211,6 +292,27 @@ from cad_agent import CadAgent
 from web_agent import WebAgent
 from kasa_agent import KasaAgent
 from printer_agent import PrinterAgent
+
+# Digital Suite (Briefing, Productivity, Research, System Ops)
+try:
+    from digital_suite import (
+        get_briefing,
+        format_briefing_for_model,
+        get_today_schedule,
+        format_schedule_for_speech,
+        reschedule_event as productivity_reschedule_event,
+        get_system_status,
+        kill_process_by_name,
+        kill_process_by_pid,
+        list_top_processes,
+        search_web,
+        wikipedia_summary,
+    )
+    from digital_suite.system_ops import format_system_status_for_speech
+except ImportError:
+    get_briefing = format_briefing_for_model = get_today_schedule = format_schedule_for_speech = None
+    productivity_reschedule_event = get_system_status = kill_process_by_name = kill_process_by_pid = None
+    list_top_processes = search_web = wikipedia_summary = format_system_status_for_speech = None
 
 class AudioLoop:
     def __init__(self, video_mode=DEFAULT_MODE, on_audio_data=None, on_video_frame=None, on_cad_data=None, on_web_data=None, on_transcription=None, on_tool_confirmation=None, on_cad_status=None, on_cad_thought=None, on_project_update=None, on_device_update=None, on_error=None, input_device_index=None, input_device_name=None, output_device_index=None, kasa_agent=None):
@@ -720,21 +822,19 @@ class AudioLoop:
                         print("The tool was called")
                         function_responses = []
                         for fc in response.tool_call.function_calls:
-                            if fc.name in ["generate_cad", "run_web_agent", "write_file", "read_directory", "read_file", "create_project", "switch_project", "list_projects", "list_smart_devices", "control_light", "discover_printers", "print_stl", "get_print_status", "iterate_cad"]:
+                            if fc.name in ["generate_cad", "run_web_agent", "write_file", "read_directory", "read_file", "create_project", "switch_project", "list_projects", "list_smart_devices", "control_light", "discover_printers", "print_stl", "get_print_status", "iterate_cad", "get_briefing", "get_today_schedule", "reschedule_event", "get_system_status", "kill_process", "web_search", "wikipedia_lookup"]:
                                 prompt = fc.args.get("prompt", "") # Prompt is not present for all tools
                                 
                                 # Check Permissions (Default to True if not set)
                                 confirmation_required = self.permissions.get(fc.name, True)
-                                
+                                confirmed = False
                                 if not confirmation_required:
                                     print(f"[Jarvis DEBUG] [TOOL] Permission check: '{fc.name}' -> AUTO-ALLOW")
-                                    # Skip confirmation block and jump to execution
-                                    pass
+                                    confirmed = True
                                 else:
                                     # Confirmation Logic
-                                    if self.on_tool_confirmation:
-                                        import uuid
-                                        request_id = str(uuid.uuid4())
+                                    import uuid
+                                    request_id = str(uuid.uuid4())
                                     print(f"[Jarvis DEBUG] [STOP] Requesting confirmation for '{fc.name}' (ID: {request_id})")
                                     
                                     future = asyncio.Future()
@@ -754,18 +854,6 @@ class AudioLoop:
                                         self._pending_confirmations.pop(request_id, None)
 
                                     print(f"[Jarvis DEBUG] [CONFIRM] Request {request_id} resolved. Confirmed: {confirmed}")
-
-                                    if not confirmed:
-                                        print(f"[Jarvis DEBUG] [DENY] Tool call '{fc.name}' denied by user.")
-                                        function_response = types.FunctionResponse(
-                                            id=fc.id,
-                                            name=fc.name,
-                                            response={
-                                                "result": "User denied the request to use this tool.",
-                                            }
-                                        )
-                                        function_responses.append(function_response)
-                                        continue
 
                                     if not confirmed:
                                         print(f"[Jarvis DEBUG] [DENY] Tool call '{fc.name}' denied by user.")
@@ -1111,6 +1199,120 @@ class AudioLoop:
                                         id=fc.id, name=fc.name, response={"result": result_str}
                                     )
                                     function_responses.append(function_response)
+
+                                elif fc.name == "get_briefing":
+                                    print(f"[Jarvis DEBUG] [TOOL] Tool Call: 'get_briefing'")
+                                    if get_briefing is None:
+                                        result_str = "Briefing module not available."
+                                    else:
+                                        inc_news = fc.args.get("include_news", False)
+                                        inc_stocks = fc.args.get("include_stocks", False)
+                                        briefing = await asyncio.to_thread(
+                                            get_briefing,
+                                            include_weather=True,
+                                            include_system=True,
+                                            include_news=bool(inc_news),
+                                            include_stocks=bool(inc_stocks),
+                                        )
+                                        result_str = format_briefing_for_model(briefing) if format_briefing_for_model else str(briefing)
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": result_str}
+                                    )
+                                    function_responses.append(function_response)
+
+                                elif fc.name == "get_today_schedule":
+                                    print(f"[Jarvis DEBUG] [TOOL] Tool Call: 'get_today_schedule'")
+                                    if get_today_schedule is None:
+                                        result_str = "Calendar not available."
+                                    else:
+                                        schedule = await asyncio.to_thread(get_today_schedule)
+                                        result_str = format_schedule_for_speech(schedule) if format_schedule_for_speech else str(schedule.get("events", []))
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": result_str}
+                                    )
+                                    function_responses.append(function_response)
+
+                                elif fc.name == "reschedule_event":
+                                    event_id = fc.args.get("event_id")
+                                    new_start = fc.args.get("new_start_iso")
+                                    new_end = fc.args.get("new_end_iso")
+                                    print(f"[Jarvis DEBUG] [TOOL] Tool Call: 'reschedule_event' event_id={event_id}")
+                                    if productivity_reschedule_event is None:
+                                        result_str = "Calendar not available."
+                                    else:
+                                        out = await asyncio.to_thread(
+                                            productivity_reschedule_event, "primary", event_id, new_start, new_end
+                                        )
+                                        result_str = out.get("error", "Event rescheduled.") if not out.get("success") else "Event rescheduled successfully."
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": result_str}
+                                    )
+                                    function_responses.append(function_response)
+
+                                elif fc.name == "get_system_status":
+                                    print(f"[Jarvis DEBUG] [TOOL] Tool Call: 'get_system_status'")
+                                    if get_system_status is None or format_system_status_for_speech is None:
+                                        result_str = "System ops not available."
+                                    else:
+                                        status = await asyncio.to_thread(get_system_status)
+                                        result_str = format_system_status_for_speech(status)
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": result_str}
+                                    )
+                                    function_responses.append(function_response)
+
+                                elif fc.name == "kill_process":
+                                    name_sub = fc.args.get("name_substring")
+                                    pid = fc.args.get("pid")
+                                    print(f"[Jarvis DEBUG] [TOOL] Tool Call: 'kill_process' name_substring={name_sub} pid={pid}")
+                                    if kill_process_by_name is None and kill_process_by_pid is None:
+                                        result_str = "System ops not available."
+                                    elif pid is not None:
+                                        ok, result_str = await asyncio.to_thread(kill_process_by_pid, int(pid))
+                                    elif name_sub:
+                                        ok, result_str = await asyncio.to_thread(kill_process_by_name, name_sub)
+                                    else:
+                                        result_str = "Provide name_substring or pid."
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": result_str}
+                                    )
+                                    function_responses.append(function_response)
+
+                                elif fc.name == "web_search":
+                                    query = fc.args.get("query", "")
+                                    print(f"[Jarvis DEBUG] [TOOL] Tool Call: 'web_search' query='{query}'")
+                                    if search_web is None:
+                                        result_str = "Web search not available."
+                                    else:
+                                        results = await asyncio.to_thread(search_web, query, 5)
+                                        if results and results[0].get("error"):
+                                            result_str = results[0]["error"]
+                                        else:
+                                            result_str = "\n".join(
+                                                f"- {r.get('title', '')}: {r.get('snippet', '')[:200]}..."
+                                                for r in (results or [])[:5]
+                                            ) or "No results."
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": result_str}
+                                    )
+                                    function_responses.append(function_response)
+
+                                elif fc.name == "wikipedia_lookup":
+                                    query = fc.args.get("query", "")
+                                    print(f"[Jarvis DEBUG] [TOOL] Tool Call: 'wikipedia_lookup' query='{query}'")
+                                    if wikipedia_summary is None:
+                                        result_str = "Wikipedia lookup not available."
+                                    else:
+                                        out = await asyncio.to_thread(wikipedia_summary, query)
+                                        if out.get("error"):
+                                            result_str = out["error"]
+                                        else:
+                                            result_str = f"{out.get('title', '')}\n{out.get('summary', '')}"
+                                    function_response = types.FunctionResponse(
+                                        id=fc.id, name=fc.name, response={"result": result_str}
+                                    )
+                                    function_responses.append(function_response)
+
                         if function_responses:
                             await self.session.send_tool_response(function_responses=function_responses)
                 

@@ -22,3 +22,14 @@ python-dotenv
 mediapipe
 # CAD Generation
 build123d
+# Digital Suite (Briefing, System, Research, Productivity)
+psutil
+requests
+feedparser
+yfinance
+duckduckgo-search
+wikipedia
+# Google Calendar / Productivity
+google-api-python-client
+google-auth-oauthlib
+google-auth

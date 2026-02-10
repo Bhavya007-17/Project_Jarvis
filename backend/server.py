@@ -67,7 +67,14 @@ DEFAULT_SETTINGS = {
         "read_file": True,
         "create_project": True,
         "switch_project": True,
-        "list_projects": True
+        "list_projects": True,
+        "get_briefing": False,
+        "get_today_schedule": False,
+        "reschedule_event": True,
+        "get_system_status": False,
+        "kill_process": True,
+        "web_search": False,
+        "wikipedia_lookup": False,
     },
     "printers": [], # List of {host, port, name, type}
     "kasa_devices": [], # List of {ip, alias, model}

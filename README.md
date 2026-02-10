@@ -1,4 +1,4 @@
-# Jarvis - AI Assistant
+## Jarvis - AI Assistant (ADA V2)
 
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11-blue?logo=python)
 ![React](https://img.shields.io/badge/React-18.2-61DAFB?logo=react)
@@ -6,432 +6,397 @@
 ![Gemini](https://img.shields.io/badge/Google%20Gemini-Native%20Audio-4285F4?logo=google)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-> **Jarvis** — Your AI assistant for design, voice, and automation.
-
-Jarvis is a sophisticated AI assistant designed for multimodal interaction. It combines Google's Gemini 2.5 Native Audio with computer vision, gesture control, and 3D CAD generation in an Electron desktop application.
-
----
-
-## 🌟 Capabilities at a Glance
-
-| Feature | Description | Technology |
-|---------|-------------|------------|
-| **🗣️ Low-Latency Voice** | Real-time conversation with interrupt handling | Gemini 2.5 Native Audio |
-| **🧊 Parametric CAD** | Editable 3D model generation from voice prompts | `build123d` → STL |
-| **🖨️ 3D Printing** | Slicing and wireless print job submission | OrcaSlicer + Moonraker/OctoPrint |
-| **🖐️ Minority Report UI** | Gesture-controlled window manipulation | MediaPipe Hand Tracking |
-| **👁️ Face Authentication** | Secure local biometric login | MediaPipe Face Landmarker |
-| **🌐 Web Agent** | Autonomous browser automation | Playwright + Chromium |
-| **🏠 Smart Home** | Voice control for TP-Link Kasa devices | `python-kasa` |
-| **📁 Project Memory** | Persistent context across sessions | File-based JSON storage |
-
-### 🖐️ Gesture Control Details
-
-Jarvis's "Minority Report" interface uses your webcam to detect hand gestures:
-
-| Gesture | Action |
-|---------|--------|
-| 🤏 **Pinch** | Confirm action / click |
-| ✋ **Open Palm** | Release the window |
-| ✊ **Close Fist** | "Select" and grab a UI window to drag it |
-
-> **Tip**: Enable the video feed window to see the hand tracking overlay.
+Jarvis is a multimodal desktop AI assistant inspired by the “Jarvis OS” fantasy: real-time voice, CAD, web automation, smart home control, and now a full digital suite for briefing, research, and system monitoring.  
+It runs entirely on your machine (Electron + Python), talking to Gemini 2.5 Native Audio plus a set of local tools and free APIs.
 
 ---
 
-## 🏗️ Architecture Overview
+## Key Capabilities
+
+| Capability | What it Does | Tech |
+|-----------|--------------|------|
+| Low-latency voice loop | Always-on, interruptible conversation, streaming transcription | Gemini 2.5 Native Audio |
+| Morning Briefing | Weather, today’s schedule, system health, optional news and stocks | Open-Meteo, Google Calendar, psutil, RSS, yfinance |
+| Productivity (Chief of Staff) | Read today’s calendar, reschedule events | Google Calendar API |
+| Oracle / Research | Material properties, factual lookups, summaries | DuckDuckGo search, Wikipedia |
+| Parametric CAD (Engineer) | Voice-to-CAD, STL export, iterative edits | build123d + local script execution |
+| 3D printing pipeline | Discover printers, slice STL, send jobs | OrcaSlicer, Moonraker/OctoPrint |
+| Smart home control | Control TP-Link Kasa lights and plugs | python-kasa |
+| Face authentication (Sentinel) | Unlock UI only on recognized face | MediaPipe Face Landmarker |
+| Gesture UI | “Minority Report” style window manipulation | MediaPipe Hands + React/Three.js |
+| Project memory | Per-project logs and CAD artifacts on disk | JSON + file structure |
+
+---
+
+## Digital Suite Overview (New)
+
+The new `digital_suite` backend package implements the PRD “feathers”:
+
+- **Briefing (`digital_suite/briefing.py`)**
+  - Single `get_briefing()` call that aggregates:
+    - Weather via Open-Meteo (no API key)
+    - System status via `psutil` (CPU, RAM, battery, GPU temp when available)
+    - Today’s calendar (Google Calendar) when configured
+    - Optional RSS news (BBC, TechCrunch) and stocks (yfinance, e.g. NVDA)
+  - `format_briefing_for_model()` turns this into a concise text block for Jarvis to speak.
+
+- **Productivity (`digital_suite/productivity.py`)**
+  - Google Calendar integration (free tier, OAuth2):
+    - `get_today_schedule()` – list today’s events from the primary calendar
+    - `reschedule_event()` – move an event to a new time
+  - Stores tokens locally in `backend/credentials/google_tokens.json` (never committed).
+
+- **Research (`digital_suite/research.py`)**
+  - `search_web()` – DuckDuckGo search for quick factual and reference lookups.
+  - `wikipedia_summary()` – short Wikipedia summaries (title, summary, URL).
+
+- **System Ops (`digital_suite/system_ops.py`)**
+  - `get_system_status()` – CPU, RAM, battery, GPU note/temperature.
+  - `format_system_status_for_speech()` – short “status report” sentence.
+  - `list_top_processes()` – top CPU-consuming processes.
+  - `kill_process_by_name()` / `kill_process_by_pid()` – terminate misbehaving apps on request.
+
+Jarvis exposes these as tools to Gemini, so you can say:
+- “Jarvis, give me the briefing.”
+- “What’s on my calendar today?”
+- “Kill that render process.”
+- “What’s the density of Inconel 718?”
+
+---
+
+## Architecture Overview
 
 ```mermaid
-graph TB
-    subgraph Frontend ["Frontend (Electron + React)"]
-        UI[React UI]
-        THREE[Three.js 3D Viewer]
-        GESTURE[MediaPipe Gestures]
-        SOCKET_C[Socket.IO Client]
-    end
-    
-    subgraph Backend ["Backend (Python 3.11 + FastAPI)"]
-        SERVER[server.py<br/>Socket.IO Server]
-        JARVIS[jarvis.py<br/>Gemini Live API]
-        WEB[web_agent.py<br/>Playwright Browser]
-        CAD[cad_agent.py<br/>CAD + build123d]
-        PRINTER[printer_agent.py<br/>3D Printing + OrcaSlicer]
-        KASA[kasa_agent.py<br/>Smart Home]
-        AUTH[authenticator.py<br/>MediaPipe Face Auth]
-        PM[project_manager.py<br/>Project Context]
-    end
-    
-    UI --> SOCKET_C
-    SOCKET_C <--> SERVER
-    SERVER --> JARVIS
-    JARVIS --> WEB
-    JARVIS --> CAD
-    JARVIS --> KASA
-    SERVER --> AUTH
-    SERVER --> PM
-    SERVER --> PRINTER
-    CAD -->|STL file| THREE
-    CAD -->|STL file| PRINTER
+flowchart TB
+  subgraph frontend [Frontend (Electron + React)]
+    ui[React UI]
+    three[Three.js 3D Viewer]
+    gesture[MediaPipe Gestures]
+    socketClient[Socket.IO Client]
+  end
+
+  subgraph backend [Backend (Python 3.11 + FastAPI)]
+    server[server.py (FastAPI + Socket.IO)]
+    jarvis[jarvis.py (Gemini Live AudioLoop)]
+    digi[digital_suite (Briefing, Productivity, Research, System Ops)]
+    cad[cad_agent.py (build123d CAD)]
+    printer[printer_agent.py (3D printing + OrcaSlicer)]
+    kasa[kasa_agent.py (Smart Home)]
+    auth[authenticator.py (Face Auth)]
+    pm[project_manager.py (Projects/Memory)]
+    webAgent[web_agent.py (Playwright Web Agent)]
+  end
+
+  subgraph external [External APIs]
+    gemini[Gemini Live]
+    openMeteo[Open-Meteo Weather]
+    gcal[Google Calendar]
+    rss[RSS News]
+    stocks[yfinance]
+    ddg[DuckDuckGo Search]
+    wiki[Wikipedia]
+  end
+
+  ui --> socketClient
+  socketClient <--> server
+
+  server --> jarvis
+  server --> auth
+  server --> printer
+  server --> kasa
+  server --> pm
+
+  jarvis --> gemini
+  jarvis --> cad
+  jarvis --> webAgent
+  jarvis --> digi
+
+  digi --> openMeteo
+  digi --> gcal
+  digi --> rss
+  digi --> stocks
+  digi --> ddg
+  digi --> wiki
+
+  cad --> printer
+  cad --> ui
 ```
 
 ---
 
-## ⚡ TL;DR Quick Start (Experienced Developers)
-
-<details>
-<summary>Click to expand quick setup commands</summary>
+## Quick Start (Experienced Developers)
 
 ```bash
 # 1. Clone and enter
-git clone https://github.com/nazirlouis/ada_v2.git && cd ada_v2  # or your Jarvis repo
+git clone <this-repo-url> jarvis && cd jarvis
 
 # 2. Create Python environment (Python 3.11)
-conda create -n jarvis python=3.11 -y && conda activate jarvis
-brew install portaudio  # macOS only (for PyAudio)
+conda create -n jarvis python=3.11 -y
+conda activate jarvis
+
+# 3. Install Python deps and browsers
 pip install -r requirements.txt
 playwright install chromium
 
-# 3. Setup frontend
+# 4. Setup frontend
 npm install
 
-# 4. Create .env file
+# 5. Configure Gemini key
 echo "GEMINI_API_KEY=your_key_here" > .env
 
-# 5. Run!
-conda activate jarvis && npm run dev
+# 6. Run
+npm run dev
 ```
 
-</details>
+The Electron shell will launch and connect to the backend automatically.
 
 ---
 
-## 🛠️ Installation Requirements
+## Beginner-Friendly Setup
 
-### 🆕 Absolute Beginner Setup (Start Here)
-If you have never coded before, follow these steps first!
+### 1. Tools to Install
 
-**Step 1: Install Visual Studio Code (The Editor)**
-- Download and install [VS Code](https://code.visualstudio.com/). This is where you will write code and run commands.
+- Visual Studio Code – editor and terminal  
+- Miniconda – manages Python environments  
+- Git – downloads this repository  
+- Node.js 18+ – for the React/Electron frontend
 
-**Step 2: Install Anaconda (The Manager)**
-- Download [Miniconda](https://docs.conda.io/en/latest/miniconda.html) (a lightweight version of Anaconda).
-- This tool allows us to create isolated "playgrounds" (environments) for our code so different projects don't break each other.
-- **Windows Users**: During install, check "Add Anaconda to my PATH environment variable" (even if it says not recommended, it makes things easier for beginners).
-
-**Step 3: Install Git (The Downloader)**
-- **Windows**: Download [Git for Windows](https://git-scm.com/download/win).
-- **Mac**: Open the "Terminal" app (Cmd+Space, type Terminal) and type `git`. If not installed, it will ask to install developer tools—say yes.
-
-**Step 4: Get the Code**
-1. Open your terminal (or Command Prompt on Windows).
-2. Type this command and hit Enter:
-   ```bash
-   git clone https://github.com/nazirlouis/ada_v2.git
-   ```
-3. This creates a folder for the project.
-
-**Step 5: Open in VS Code**
-1. Open VS Code.
-2. Go to **File > Open Folder**.
-3. Select the project folder you just downloaded.
-4. Open the internal terminal: Press `Ctrl + ~` (tilde) or go to **Terminal > New Terminal**.
-
----
-
-### ⚠️ Technical Prerequisites
-Once you have the basics above, continue here.
-
-### 1. System Dependencies
-
-**MacOS:**
-```bash
-# Audio Input/Output support (PyAudio)
-brew install portaudio
-```
-
-**Windows:**
-- No additional system dependencies required!
+Clone the repo with Git, open it in VS Code, and use the built-in terminal for all commands.
 
 ### 2. Python Environment
-Create a single Python 3.11 environment:
 
 ```bash
 conda create -n jarvis python=3.11
 conda activate jarvis
 
-# Install all dependencies
 pip install -r requirements.txt
-
-# Install Playwright browsers
 playwright install chromium
 ```
 
 ### 3. Frontend Setup
-Requires **Node.js 18+** and **npm**. Download from [nodejs.org](https://nodejs.org/) if not installed.
 
 ```bash
-# Verify Node is installed
-node --version  # Should show v18.x or higher
-
-# Install frontend dependencies
 npm install
 ```
 
-### 4. 🔐 Face Authentication Setup
-To use the secure voice features, Jarvis needs to know what you look like.
+### 4. Gemini API Key
 
-1. Take a clear photo of your face (or use an existing one).
-2. Rename the file to `reference.jpg`.
-3. Drag and drop this file into the project's `backend` folder.
-4. (Optional) You can toggle this feature on/off in `settings.json` by changing `"face_auth_enabled": true/false`.
+1. Go to `https://aistudio.google.com/app/apikey`
+2. Create an API key.
+3. In the project root, create `.env`:
 
----
+```bash
+echo "GEMINI_API_KEY=your_api_key_here" > .env
+```
 
-## ⚙️ Configuration (`settings.json`)
+Do not commit this file.
 
-The system creates a `settings.json` file on first run. You can modify this to change behavior:
+### 5. Face Authentication (Optional but Recommended)
 
-| Key | Type | Description |
-| :--- | :--- | :--- |
-| `face_auth_enabled` | `bool` | If `true`, blocks all AI interaction until your face is recognized via the camera. |
-| `tool_permissions` | `obj` | Controls manual approval for specific tools. |
-| `tool_permissions.generate_cad` | `bool` | If `true`, requires you to click "Confirm" on the UI before generating CAD. |
-| `tool_permissions.run_web_agent` | `bool` | If `true`, requires confirmation before opening the browser agent. |
-| `tool_permissions.write_file` | `bool` | **Critical**: Requires confirmation before the AI writes code/files to disk. |
+1. Take a clear photo of your face.
+2. Rename to `reference.jpg`.
+3. Place it in the `backend/` folder.
+4. In `backend/settings.json`, set `"face_auth_enabled": true` to require face unlock.
 
 ---
 
-### 5. 🖨️ 3D Printer Setup
-Jarvis can slice STL files and send them directly to your 3D printer.
+## Running Jarvis
 
-**Supported Hardware:**
-- **Klipper/Moonraker** (Creality K1, Voron, etc.)
-- **OctoPrint** instances
-- **PrusaLink** (Experimental)
+### Option 1: Single Terminal (recommended)
 
-**Step 1: Install Slicer**
-Jarvis uses **OrcaSlicer** (recommended) or PrusaSlicer to generate G-code.
-1. Download and install [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer).
-2. Run it once to ensure profiles are created.
-3. Jarvis automatically detects the installation path.
+```bash
+conda activate jarvis
+npm run dev
+```
 
-**Step 2: Connect Printer**
-1. Ensure your printer and computer are on the **same Wi-Fi network**.
-2. Open the **Printer Window** in Jarvis (Cube icon).
-3. Jarvis automatically scans for printers using mDNS.
-4. **Manual Connection**: If your printer isn't found, use the "Add Printer" button and enter the IP address (e.g., `192.168.1.50`).
+The React dev server and Electron shell will start, and the backend will be launched for you.
 
----
+### Option 2: Separate Backend and Frontend
 
-### 6. 🔑 Gemini API Key Setup
-Jarvis uses Google's Gemini API for voice and intelligence. You need a free API key.
+Terminal 1 (backend):
 
-1. Go to [Google AI Studio](https://aistudio.google.com/app/apikey).
-2. Sign in with your Google account.
-3. Click **"Create API Key"** and copy the generated key.
-4. Create a file named `.env` in the project root folder (same level as `README.md`).
-5. Add this line to the file:
-   ```
-   GEMINI_API_KEY=your_api_key_here
-   ```
-6. Replace `your_api_key_here` with the key you copied.
-
-> **Note**: Keep this key private! Never commit your `.env` file to Git.
-
----
-
-## 🚀 Running Jarvis
-
-You have two options to run the app. Ensure your `jarvis` environment is active!
-
-### Option 1: The "Easy" Way (Single Terminal)
-The app is smart enough to start the backend for you.
-1. Open your terminal in the project folder.
-2. Activate your environment: `conda activate jarvis`
-3. Run:
-   ```bash
-   npm run dev
-   ```
-4. The backend will start automatically in the background.
-
-### Option 2: The "Developer" Way (Two Terminals)
-Use this if you want to see the Python logs (recommended for debugging).
-
-**Terminal 1 (Backend):**
 ```bash
 conda activate jarvis
 python backend/server.py
 ```
 
-**Terminal 2 (Frontend):**
+Terminal 2 (frontend):
+
 ```bash
-# Environment doesn't matter here, but keep it simple
 npm run dev
 ```
 
----
+You can also run the backend entrypoint explicitly:
 
-## ✅ First Flight Checklist (Things to Test)
-
-1. **Voice Check**: Say "Hello Jarvis". He should respond.
-2. **Vision Check**: Look at the camera. If Face Auth is on, the lock screen should unlock.
-3. **CAD Check**: Open the CAD window and say "Create a cube". Watch the logs.
-4. **Web Check**: Open the Browser window and say "Go to Google".
-5. **Smart Home**: If you have Kasa devices, say "Turn on the lights".
-
----
-
-## ▶️ Commands & Tools Reference
-
-### 🗣️ Voice Commands
-- "Switch project to [Name]"
-- "Create a new project called [Name]"
-- "Turn on the [Room] light"
-- "Make the light [Color]"
-- "Pause audio" / "Stop audio"
-
-### 🧊 3D CAD
-- **Prompt**: "Create a 3D model of a hex bolt."
-- **Iterate**: "Make the head thinner." (Requires previous context)
-- **Files**: Saves to `projects/[ProjectName]/output.stl`.
-
-### 🌐 Web Agent
-- **Prompt**: "Go to Amazon and find a USB-C cable under $10."
-- **Note**: The agent will auto-scroll, click, and type. Do not interfere with the browser window while it runs.
-
-### 🖨️ Printing & Slicing
-- **Auto-Discovery**: Jarvis automatically finds printers on your network.
-- **Slicing**: Click "Slice & Print" on any generated 3D model.
-- **Profiles**: Jarvis intelligently selects the correct OrcaSlicer profile based on your printer's name (e.g., "Creality K1").
-
----
-
-## ❓ Troubleshooting FAQ
-
-### Camera not working / Permission denied (Mac)
-**Symptoms**: Error about camera access, or video feed shows black.
-
-**Solution**:
-1. Go to **System Preferences > Privacy & Security > Camera**.
-2. Ensure your terminal app (e.g., Terminal, iTerm, VS Code) has camera access enabled.
-3. Restart the app after granting permission.
-
----
-
-### `GEMINI_API_KEY` not found / Authentication Error
-**Symptoms**: Backend crashes on startup with "API key not found".
-
-**Solution**:
-1. Make sure your `.env` file is in the project root folder (not inside `backend/`).
-2. Verify the format is exactly: `GEMINI_API_KEY=your_key` (no quotes, no spaces).
-3. Restart the backend after editing the file.
-
----
-
-### WebSocket connection errors (1011)
-**Symptoms**: `websockets.exceptions.ConnectionClosedError: 1011 (internal error)`.
-
-**Solution**:
-This is a server-side issue from the Gemini API. Simply reconnect by clicking the connect button or saying "Hello Jarvis" again. If it persists, check your internet connection or try again later.
-
----
-
-## 📸 What It Looks Like
-
-*Coming soon! Screenshots and demo videos will be added here.*
-
----
-
-## 📂 Project Structure
-
+```bash
+python backend/main.py
 ```
+
+---
+
+## Tooling and Configuration
+
+### settings.json
+
+`settings.json` is created on first run and lives in the project root. Key fields:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `face_auth_enabled` | bool | Require face recognition before enabling tools. |
+| `tool_permissions` | object | Per-tool confirmation flags (true = ask user; false = auto-allow). |
+
+Important tool flags include:
+
+- `generate_cad`
+- `run_web_agent`
+- `write_file`
+- `read_directory`
+- `read_file`
+- `create_project`, `switch_project`, `list_projects`
+- `get_briefing`
+- `get_today_schedule`
+- `reschedule_event`
+- `get_system_status`
+- `kill_process`
+- `web_search`
+- `wikipedia_lookup`
+
+You can tune which tools require explicit user confirmation from the Settings window in the UI or by editing `settings.json` while Jarvis is stopped.
+
+### Google Calendar / Productivity
+
+1. Create a Google Cloud project and OAuth Client ID (Desktop app).
+2. Save the downloaded client secrets as `backend/credentials/client_secret.json`.
+3. First time Jarvis uses calendar tools (`get_today_schedule`, `reschedule_event`), a browser window will open for OAuth; approve access.
+4. Tokens are written to `backend/credentials/google_tokens.json` (ignored by Git).
+
+---
+
+## Digital Suite Scenarios
+
+Some examples of how the new modules behave:
+
+- **Morning Briefing**
+  - “Jarvis, wake up.”  
+  - “Give me the briefing.”  
+  - Jarvis calls `get_briefing` and responds with:
+    - Weather in your configured location (Open-Meteo)
+    - Today’s schedule (Google Calendar)
+    - System health (“CPU at X%, RAM at Y%, battery Z%”)
+    - Optional top headlines and a stock like NVDA
+
+- **System Status and Process Control**
+  - “Is my GPU running hot?” → `get_system_status`
+  - “Kill that render” → `kill_process` by name or PID
+
+- **Research**
+  - “Find the density of Inconel 718 and explain it.” → `wikipedia_lookup` and/or `web_search`
+  - “Compare carbon fiber and aluminum density.” → DuckDuckGo + Wikipedia tools
+
+- **Engineer Workflow**
+  - “Create a 10 cm cube of carbon fiber and tell me its mass.”  
+    - Research tools pull density, CAD engine builds the part in `build123d`, Jarvis estimates mass.
+
+---
+
+## Commands and Windows (High Level)
+
+- Voice control:
+  - “Create a new project called [Name].”
+  - “Switch project to [Name].”
+  - “Give me the briefing.”
+  - “What’s on my calendar today?”
+  - “Turn on the office lights.”
+  - “Iterate the design, make the base thicker.”
+
+- CAD:
+  - CAD window shows the latest STL / 3D object.
+  - Designs are saved under `projects/<ProjectName>/cad/`.
+
+- Web Agent:
+  - “Open the browser and look for a USB-C cable under $10.”
+  - The Playwright-based web agent automates Chromium using Gemini’s computer-use model.
+
+- Printing:
+  - Printer window discovers Moonraker/OctoPrint/PrusaLink printers.
+  - Jarvis slices with OrcaSlicer and uploads G-code.
+
+---
+
+## Project Structure
+
+```text
 jarvis/
-├── backend/                    # Python server & AI logic
-│   ├── jarvis.py               # Gemini Live API integration
-│   ├── server.py               # FastAPI + Socket.IO server
-│   ├── cad_agent.py            # CAD generation orchestrator
-│   ├── printer_agent.py        # 3D printer discovery & slicing
-│   ├── web_agent.py            # Playwright browser automation
-│   ├── kasa_agent.py           # TP-Link smart home control
-│   ├── authenticator.py        # MediaPipe face auth logic
-│   ├── project_manager.py      # Project context management
-│   ├── tools.py                # Tool definitions for Gemini
-│   └── reference.jpg           # Your face photo (add this!)
-├── src/                        # React frontend
-│   ├── App.jsx                 # Main application component
-│   ├── components/             # UI components (11 files)
-│   └── index.css               # Global styles
-├── electron/                   # Electron main process
-│   └── main.js                 # Window & IPC setup
-├── projects/                   # User project data (auto-created)
-├── .env                        # API keys (create this!)
-├── requirements.txt            # Python dependencies
-├── package.json                # Node.js dependencies
-└── README.md                   # You are here!
+├── backend/                      # Python server & AI logic
+│   ├── main.py                   # Optional entrypoint (runs server)
+│   ├── server.py                 # FastAPI + Socket.IO server
+│   ├── jarvis.py                 # Gemini Live audio loop + tool orchestration
+│   ├── digital_suite/            # NEW: Briefing, Productivity, Research, System Ops
+│   │   ├── briefing.py
+│   │   ├── productivity.py
+│   │   ├── research.py
+│   │   ├── system_ops.py
+│   │   └── __init__.py
+│   ├── cad_agent.py              # build123d CAD generation
+│   ├── printer_agent.py          # 3D printer discovery & slicing
+│   ├── web_agent.py              # Playwright browser automation
+│   ├── kasa_agent.py             # TP-Link smart home
+│   ├── authenticator.py          # MediaPipe face auth
+│   ├── project_manager.py        # Per-project context and logs
+│   ├── tools.py                  # Base tool declarations
+│   └── credentials/              # OAuth secrets and tokens (gitignored JSON)
+├── src/                          # React frontend
+│   ├── App.jsx
+│   ├── components/
+│   └── index.css
+├── electron/                     # Electron main process
+│   └── main.js
+├── projects/                     # User project data (auto-created)
+├── .env                          # API keys (Gemini)
+├── requirements.txt              # Python dependencies
+├── package.json                  # Node.js dependencies
+└── README.md                     # This file
 ```
 
 ---
 
-## ⚠️ Known Limitations
+## Known Limitations
 
 | Limitation | Details |
-|------------|---------|
-| **macOS & Windows** | Tested on macOS 14+ and Windows 10/11. Linux is untested. |
-| **Camera Required** | Face auth and gesture control need a working webcam. |
-| **Gemini API Quota** | Free tier has rate limits; heavy CAD iteration may hit limits. |
-| **Network Dependency** | Requires internet for Gemini API (no offline mode). |
-| **Single User** | Face auth recognizes one person (the `reference.jpg`). |
+|-----------|---------|
+| Platforms | Tested on Windows 10/11 and recent macOS; Linux is not officially supported. |
+| Internet required | Gemini, Open-Meteo, DuckDuckGo, Wikipedia, and Google Calendar all require network access. |
+| Single primary user | Face auth and reference photo assume a single primary user. |
+| API quotas | Gemini free tier and external APIs may impose rate limits. |
 
 ---
 
-## 🤝 Contributing
-
-Contributions are welcome! Here's how:
-
-1. **Fork** the repository.
-2. **Create a branch**: `git checkout -b feature/amazing-feature`
-3. **Commit** your changes: `git commit -m 'Add amazing feature'`
-4. **Push** to the branch: `git push origin feature/amazing-feature`
-5. **Open a Pull Request** with a clear description.
-
-### Development Tips
-
-- Run the backend separately (`python backend/server.py`) to see Python logs.
-- Use `npm run dev` without Electron during frontend development (faster reload).
-- The `projects/` folder contains user data—don't commit it to Git.
-
----
-
-## 🔒 Security Considerations
+## Security Notes
 
 | Aspect | Implementation |
 |--------|----------------|
-| **API Keys** | Stored in `.env`, never committed to Git. |
-| **Face Data** | Processed locally, never uploaded. |
-| **Tool Confirmations** | Write/CAD/Web actions can require user approval. |
-| **No Cloud Storage** | All project data stays on your machine. |
+| API keys | Stored in `.env`, never committed. |
+| OAuth tokens | Stored under `backend/credentials/*.json`, gitignored. |
+| Face data | `reference.jpg` and face embeddings are local-only. |
+| File access | Destructive tools (write, kill_process, web_agent, CAD) can require explicit confirmation. |
 
-> [!WARNING]
-> Never share your `.env` file or `reference.jpg`. These contain sensitive credentials and biometric data.
-
----
-
-## 🙏 Acknowledgments
-
-- **[Google Gemini](https://deepmind.google/technologies/gemini/)** — Native Audio API for real-time voice
-- **[build123d](https://github.com/gumyr/build123d)** — Modern parametric CAD library
-- **[MediaPipe](https://developers.google.com/mediapipe)** — Hand tracking, gesture recognition, and face authentication
-- **[Playwright](https://playwright.dev/)** — Reliable browser automation
+Never share your `.env`, `backend/credentials/` JSON files, or `backend/reference.jpg`.
 
 ---
 
-## 📄 License
+## Contributing
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+Contributions are welcome:
+
+1. Fork the repository.
+2. Create a feature branch: `git checkout -b feature/your-feature`.
+3. Commit changes: `git commit -m "Add your feature"`.
+4. Push: `git push origin feature/your-feature`.
+5. Open a Pull Request with a clear description.
 
 ---
 
-<p align="center">
-  <strong>Built with 🤖 by Nazir Louis</strong><br>
-  <em>Bridging AI, CAD, and Vision in a Single Interface</em>
-</p>
+## License
+
+This project is licensed under the MIT License. See the `LICENSE` file for details.
+
